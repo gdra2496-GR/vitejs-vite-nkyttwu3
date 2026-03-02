@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { SpeedInsights } from '@vercel/speed-insights/react';
 
 /* ─────────────────────────────────────────────────────────────
    ⚙️  CONFIGURACIÓN — reemplaza con tus credenciales de Supabase
@@ -499,6 +500,7 @@ export default function App() {
         <div className="spin" style={{ height: '100vh' }}>
           Cargando Fondo Solidario...
         </div>
+        <SpeedInsights />
       </>
     );
 
@@ -512,6 +514,7 @@ export default function App() {
             {toast.msg}
           </div>
         )}
+        <SpeedInsights />
       </>
     );
 
@@ -2742,6 +2745,7 @@ function AdminRetiro({ showToast }) {
           ))}
         </div>
       )}
+      <SpeedInsights />
     </>
   );
 }
