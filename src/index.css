@@ -34,7 +34,7 @@
   :root {
     --text: #9ca3af;
     --text-h: #f3f4f6;
-    --bg: #16171d;
+    --bg: #161619;
     --border: #2e303a;
     --code-bg: #1f2028;
     --accent: #c084fc;
@@ -77,6 +77,7 @@ h1 {
   font-size: 56px;
   letter-spacing: -1.68px;
   margin: 32px 0;
+  color:#e5e4e7;
   @media (max-width: 1024px) {
     font-size: 36px;
     margin: 20px 0;

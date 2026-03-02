@@ -524,7 +524,7 @@ export default function App() {
             <button className="mmb" onClick={() => setNav((v) => !v)}>
               ☰
             </button>
-            <div className="tl">🏦</div>
+            <div className="tl"><img src="/logo_fondo.jpg" style={{width:"100%",height:"100%",objectFit:"cover",borderRadius:"inherit"}} /></div>
             <span className="tn">{config.nombre_fondo}</span>
             {user.is_admin && <span className="badge bp">Admin</span>}
           </div>
@@ -669,7 +669,7 @@ function AuthScreen({ config, onLogin, showToast }) {
     <div className="auth-wrap">
       <div className="auth-box">
         <div className="auth-brand">
-          <div className="lr">🏦</div>
+          <div className="lr"><img src="/logo_fondo.jpg" style={{width:"100%",height:"100%",objectFit:"cover",borderRadius:"inherit"}} /></div>
           <h1>{config?.nombre_fondo || 'Fondo Solidario'}</h1>
           <p>Ingresa con tu número de cédula</p>
         </div>
