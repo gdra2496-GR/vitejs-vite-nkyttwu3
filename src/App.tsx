@@ -687,12 +687,6 @@ function AuthScreen({ config, onLogin, showToast }) {
           {loading ? 'Verificando…' : 'Entrar al Fondo'}
         </button>
         {error && <div className="err-msg">{error}</div>}
-        <div className="info-box">
-          <strong>⚠️ Primera vez:</strong> Configura tu URL y clave de Supabase
-          en el archivo y ejecuta el schema SQL.
-          <br />
-          Admin: cédula <strong>admin</strong>
-        </div>
       </div>
     </div>
   );
