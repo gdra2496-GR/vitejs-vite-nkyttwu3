@@ -1277,81 +1277,32 @@ function AdminAportes({ config, showToast, setLight }) {
   };
 
   const registrarManual = async () => {
-    const cedula = window.prompt('Cédula del miembro:');
-    const m = await api.getMiembroByCedula(cedula?.trim());
-    if (!m) {
-      showToast('Miembro no encontrado.', 'err');
-      return;
-    }
-    const montoStr = window.prompt('Monto en pesos (ej: 200000):');
-    const monto = parseInt(montoStr || '0') * 100;
-    const comp = window.prompt('Referencia/comprobante:') || 'MANUAL';
-    const mes = mesActual();
+    const cedula = window.prompt("Cédula del miembro:");
+    if (!cedula) return;
+    const m = await api.getMiembroByCedula(cedula.trim());
+    if (!m) { showToast("Miembro no encontrado.","err"); return; }
+    
+    const mesOpciones = [
+      "Diciembre 2025","Enero 2026","Febrero 2026","Marzo 2026",
+      "Abril 2026","Mayo 2026","Junio 2026","Julio 2026",
+      "Agosto 2026","Septiembre 2026","Octubre 2026","Noviembre 2026"
+    ];
+    const mesLista = mesOpciones.map((m,i) => `${i+1}. ${m}`).join("\n");
+    const mesIdx = window.prompt(`Selecciona el mes:\n${mesLista}\n\nEscribe el número:`);
+    if (!mesIdx) return;
+    const mesSeleccionado = mesOpciones[parseInt(mesIdx)-1];
+    if (!mesSeleccionado) { showToast("Número de mes inválido.","err"); return; }
+    
+    const montoStr = window.prompt(`Monto en pesos (aporte estándar: ${config.monto_mensual}):`);
+    const monto = parseInt(montoStr||"0");
+    if (!monto) return;
+    const comp = window.prompt("Referencia / comprobante:") || "MANUAL";
     try {
-      await api.createAporte({
-        miembro_id: m.id,
-        monto,
-        mes,
-        fecha: today(),
-        comprobante: comp,
-        estado: 'confirmado',
-        nota: 'Registro manual admin',
-      });
-      await api.updateMiembro(m.id, { saldo: (m.saldo || 0) + monto });
-      showToast(`Aporte manual de ${m.nombre} registrado.`);
-      refetch();
-    } catch (e) {
-      showToast(e.message, 'err');
-    }
-  };
-
-  const pendCount = (aportes || []).filter(
-    (a) => a.estado === 'pendiente'
-  ).length;
-
-  return (
-    <>
-      <div className="ph">
-        <h2>Gestión de Aportes</h2>
-        <p>Confirma los comprobantes de los socios</p>
-      </div>
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          marginBottom: 16,
-          flexWrap: 'wrap',
-          gap: 10,
-        }}
-      >
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-          {['pendiente', 'confirmado', 'rechazado', 'todos'].map((f) => (
-            <button
-              key={f}
-              className={`btn sm ${filter === f ? 'primary' : 'ghost'}`}
-              onClick={() => setFilter(f)}
-            >
-              {f.charAt(0).toUpperCase() + f.slice(1)}
-              {f === 'pendiente' && pendCount > 0 && (
-                <span
-                  style={{
-                    marginLeft: 6,
-                    background: 'var(--red)',
-                    color: '#fff',
-                    borderRadius: '10px',
-                    padding: '1px 7px',
-                    fontSize: 10,
-                  }}
-                >
-                  {pendCount}
-                </span>
-              )}
-            </button>
-          ))}
-        </div>
-        <button className="btn success" onClick={registrarManual}>
-          + Registro Manual
+      await api.createAporte({ miembro_id:m.id, monto, mes:mesSeleccionado, fecha:today(), comprobante:comp, estado:"confirmado", nota:"Registro manual admin" });
+      await api.updateMiembro(m.id, { saldo: (m.saldo||0) + monto });
+      showToast(`✅ Aporte de ${m.nombre} — ${mesSeleccionado} registrado.`); refetch();
+    } catch(e) { showToast(e.message,"err"); }
+  };          + Registro Manual
         </button>
       </div>
 
