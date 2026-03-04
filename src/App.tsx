@@ -1391,7 +1391,6 @@ function AdminAportes({ config, showToast, setLight }) {
           </table>
         </div>
       </div>
-    </>
   );
 }
 
