@@ -1303,8 +1303,6 @@ function AdminAportes({ config, showToast, setLight }) {
       showToast(`✅ Aporte de ${m.nombre} — ${mesSeleccionado} registrado.`); refetch();
     } catch(e) { showToast(e.message,"err"); }
   };
-        </button>
-      </div>
 
       <div className="card">
         <div className="tw">
