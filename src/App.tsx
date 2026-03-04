@@ -1302,7 +1302,7 @@ function AdminAportes({ config, showToast, setLight }) {
       await api.updateMiembro(m.id, { saldo: (m.saldo||0) + monto });
       showToast(`✅ Aporte de ${m.nombre} — ${mesSeleccionado} registrado.`); refetch();
     } catch(e) { showToast(e.message,"err"); }
-  };          + Registro Manual
+  };
         </button>
       </div>
 
