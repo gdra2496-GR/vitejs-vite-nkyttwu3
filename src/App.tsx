@@ -1256,14 +1256,10 @@ function AdminAportes({ config, showToast, setLight }) {
   const confirmar = async (a) => {
     try {
       await api.updateAporte(a.id, { estado: 'confirmado' });
-      await api.updateMiembro(a.miembro_id, {
-        saldo: (a.miembros?.saldo || 0) + a.monto,
-      });
+      await api.updateMiembro(a.miembro_id, { saldo: (a.miembros?.saldo || 0) + a.monto });
       showToast(`Aporte de ${a.miembros?.nombre} confirmado.`);
       refetch();
-    } catch (e) {
-      showToast(e.message, 'err');
-    }
+    } catch (e) { showToast(e.message, 'err'); }
   };
 
   const rechazar = async (a) => {
@@ -1271,9 +1267,7 @@ function AdminAportes({ config, showToast, setLight }) {
       await api.updateAporte(a.id, { estado: 'rechazado' });
       showToast('Aporte rechazado.');
       refetch();
-    } catch (e) {
-      showToast(e.message, 'err');
-    }
+    } catch (e) { showToast(e.message, 'err'); }
   };
 
   const registrarManual = async () => {
@@ -1281,18 +1275,12 @@ function AdminAportes({ config, showToast, setLight }) {
     if (!cedula) return;
     const m = await api.getMiembroByCedula(cedula.trim());
     if (!m) { showToast("Miembro no encontrado.","err"); return; }
-    
-    const mesOpciones = [
-      "Diciembre 2025","Enero 2026","Febrero 2026","Marzo 2026",
-      "Abril 2026","Mayo 2026","Junio 2026","Julio 2026",
-      "Agosto 2026","Septiembre 2026","Octubre 2026","Noviembre 2026"
-    ];
+    const mesOpciones = ["Diciembre 2025","Enero 2026","Febrero 2026","Marzo 2026","Abril 2026","Mayo 2026","Junio 2026","Julio 2026","Agosto 2026","Septiembre 2026","Octubre 2026","Noviembre 2026"];
     const mesLista = mesOpciones.map((m,i) => `${i+1}. ${m}`).join("\n");
     const mesIdx = window.prompt(`Selecciona el mes:\n${mesLista}\n\nEscribe el número:`);
     if (!mesIdx) return;
     const mesSeleccionado = mesOpciones[parseInt(mesIdx)-1];
     if (!mesSeleccionado) { showToast("Número de mes inválido.","err"); return; }
-    
     const montoStr = window.prompt(`Monto en pesos (aporte estándar: ${config.monto_mensual}):`);
     const monto = parseInt(montoStr||"0");
     if (!monto) return;
@@ -1303,87 +1291,36 @@ function AdminAportes({ config, showToast, setLight }) {
       showToast(`✅ Aporte de ${m.nombre} — ${mesSeleccionado} registrado.`); refetch();
     } catch(e) { showToast(e.message,"err"); }
   };
+
+  return (
+    <>
+      <div className="ph"><h2>Gestión de Aportes</h2><p>Confirma los comprobantes enviados por los socios</p></div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16,flexWrap:"wrap",gap:10}}>
+        <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+          {["pendiente","confirmado","rechazado","todos"].map(f => (
+            <button key={f} className={`btn sm ${filter===f?"primary":"ghost"}`} onClick={()=>setFilter(f)}>{f.charAt(0).toUpperCase()+f.slice(1)}</button>
+          ))}
+        </div>
+        <button className="btn ok" onClick={registrarManual}>+ Registro Manual</button>
+      </div>
       <div className="card">
         <div className="tw">
           <table>
-            <thead>
-              <tr>
-                <th>Socio</th>
-                <th>Mes</th>
-                <th>Monto</th>
-                <th>Ref.</th>
-                <th>Foto</th>
-                <th>Fecha</th>
-                <th>Estado</th>
-                <th>Acción</th>
-              </tr>
-            </thead>
+            <thead><tr><th>Socio</th><th>Mes</th><th>Monto</th><th>Ref.</th><th>Foto</th><th>Fecha</th><th>Estado</th><th>Acción</th></tr></thead>
             <tbody>
               {!aportes?.length ? (
-                <tr>
-                  <td colSpan={8}>
-                    <div className="empty">
-                      <div className="ei">📭</div>Sin aportes en esta categoría.
-                    </div>
-                  </td>
-                </tr>
+                <tr><td colSpan={8}><div className="empty"><div className="ei">📭</div>Sin aportes en esta categoría.</div></td></tr>
               ) : (
                 aportes.map((a) => (
                   <tr key={a.id}>
-                    <td style={{ fontWeight: 600 }}>
-                      {a.miembros?.nombre || '—'}
-                    </td>
-                    <td style={{ fontSize: 12 }}>{a.mes}</td>
-                    <td style={{ fontWeight: 600 }}>{COP(a.monto)}</td>
-                    <td style={{ fontFamily: 'monospace', fontSize: 11 }}>
-                      {a.comprobante}
-                    </td>
-                    <td>
-                      {a.foto_url ? (
-                        <img
-                          src={a.foto_url}
-                          className="pt"
-                          alt="comp"
-                          onClick={() => setLight(a.foto_url)}
-                        />
-                      ) : (
-                        <span style={{ fontSize: 11, color: 'var(--text3)' }}>
-                          —
-                        </span>
-                      )}
-                    </td>
-                    <td style={{ fontSize: 11 }}>{a.fecha}</td>
-                    <td>
-                      <span
-                        className={`badge ${
-                          a.estado === 'confirmado'
-                            ? 'bg'
-                            : a.estado === 'pendiente'
-                            ? 'bgo'
-                            : 'br'
-                        }`}
-                      >
-                        {a.estado}
-                      </span>
-                    </td>
-                    <td>
-                      {a.estado === 'pendiente' && (
-                        <div style={{ display: 'flex', gap: 6 }}>
-                          <button
-                            className="btn sm success"
-                            onClick={() => confirmar(a)}
-                          >
-                            ✓
-                          </button>
-                          <button
-                            className="btn sm danger"
-                            onClick={() => rechazar(a)}
-                          >
-                            ✗
-                          </button>
-                        </div>
-                      )}
-                    </td>
+                    <td style={{fontWeight:600}}>{a.miembros?.nombre||'—'}</td>
+                    <td style={{fontSize:12}}>{a.mes}</td>
+                    <td style={{fontWeight:600}}>{COP(a.monto)}</td>
+                    <td style={{fontFamily:'monospace',fontSize:11}}>{a.comprobante}</td>
+                    <td>{a.foto_url ? <img src={a.foto_url} className="pt" alt="comp" onClick={()=>setLight(a.foto_url)} /> : <span style={{fontSize:11,color:'var(--text3)'}}>—</span>}</td>
+                    <td style={{fontSize:11}}>{a.fecha}</td>
+                    <td><span className={`badge ${a.estado==='confirmado'?'bg':a.estado==='pendiente'?'bgo':'br'}`}>{a.estado}</span></td>
+                    <td>{a.estado==='pendiente'&&<div style={{display:'flex',gap:6}}><button className="btn sm success" onClick={()=>confirmar(a)}>✓</button><button className="btn sm danger" onClick={()=>rechazar(a)}>✗</button></div>}</td>
                   </tr>
                 ))
               )}
@@ -1391,9 +1328,9 @@ function AdminAportes({ config, showToast, setLight }) {
           </table>
         </div>
       </div>
+    </>
   );
 }
-
 /* ─────────────────────────────────────────────────────────────
    MIS PRÉSTAMOS (member)
 ───────────────────────────────────────────────────────────── */
