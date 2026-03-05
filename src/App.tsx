@@ -1022,7 +1022,7 @@ function MisAportes({ user, config, showToast }) {
       const fotoUrl = await api.uploadComprobante(file, user.id);
       await api.createAporte({
         miembro_id: user.id,
-        monto: config.monto_mensual,
+        monto: user.monto_mensual || config.monto_mensual,
         mes,
         fecha: today(),
         comprobante: comp || '—',
