@@ -19,7 +19,7 @@ const COP = (n) =>
     style: 'currency',
     currency: 'COP',
     maximumFractionDigits: 0,
-  }).format((n || 0) / 100);
+  }).format(n || 0);
 const RAW = (n) => Math.round((n || 0) * 100); // pesos → centavos para DB
 const FROM_DB = (n) => (n || 0); // ya está en pesos
 const MESES = [
