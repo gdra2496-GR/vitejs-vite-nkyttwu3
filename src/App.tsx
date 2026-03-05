@@ -21,7 +21,7 @@ const COP = (n) =>
     maximumFractionDigits: 0,
   }).format((n || 0) / 100);
 const RAW = (n) => Math.round((n || 0) * 100); // pesos → centavos para DB
-const FROM_DB = (n) => (n || 0) / 100; // centavos → pesos para mostrar
+const FROM_DB = (n) => (n || 0); // ya está en pesos
 const MESES = [
   'Enero',
   'Febrero',
