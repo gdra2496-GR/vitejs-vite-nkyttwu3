@@ -36,17 +36,10 @@ const MESES = [
   'Octubre 2026',
   'Noviembre 2026',
 ];
-const mesActual = () =>
-  `${MESES[new Date().getMonth()]} ${new Date().getFullYear()}`;
-const initials = (n) =>
-  (n || '?')
-    .split(' ')
-    .slice(0, 2)
-    .map((w) => w[0])
-    .join('')
-    .toUpperCase();
-const today = () => new Date().toISOString().split('T')[0];
-
+const mesActual = () => {
+  const meses = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+  return `${meses[new Date().getMonth()]} ${new Date().getFullYear()}`;
+};
 /* ─────────────────────────────────────────────────────────────
    SUPABASE HOOKS
 ───────────────────────────────────────────────────────────── */
