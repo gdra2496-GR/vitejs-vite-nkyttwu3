@@ -721,8 +721,7 @@ function MemberDash({ user, config }) {
     (a) => a.mes === mes && a.estado === 'pendiente'
   );
   const prestAct = (prestamos || []).filter((p) => p.estado === 'activo');
-  const totalAportado = misAportes.reduce((s, a) => s + FROM_DB(a.monto), 0);
-  const totalFondo = (allMiembros || [])
+  const totalAportado = misAportes.reduce((s, a) => s + (a.monto || 0), 0);  const totalFondo = (allMiembros || [])
     .filter((m) => !m.is_admin && m.activo)
     .reduce((s, m) => s + FROM_DB(m.saldo), 0);
   const totalGanancias = (ganancias || []).reduce(
@@ -780,8 +779,7 @@ function MemberDash({ user, config }) {
         <div className="sb go">
           <div className="si">📅</div>
           <div className="sl">Aporte mensual</div>
-          <div className="sv">{COP(config.monto_mensual)}</div>
-        </div>
+          <div className="sv">{COP(user.monto_mensual || config.monto_mensual)}</div>        </div>
         <div className="sb a">
           <div className="si">🤝</div>
           <div className="sl">Préstamos activos</div>
