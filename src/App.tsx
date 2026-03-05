@@ -23,19 +23,19 @@ const COP = (n) =>
 const RAW = (n) => Math.round((n || 0) * 100); // pesos → centavos para DB
 const FROM_DB = (n) => (n || 0); // ya está en pesos
 const MESES = [
-  'Enero',
-  'Febrero',
-  'Marzo',
-  'Abril',
-  'Mayo',
-  'Junio',
-  'Julio',
-  'Agosto',
-  'Septiembre',
-  'Octubre',
-  'Noviembre',
-  'Diciembre',
-];
+  'Diciembre 2025',
+  'Enero 2026',
+  'Febrero 2026',
+  'Marzo 2026',
+  'Abril 2026',
+  'Mayo 2026',
+  'Junio 2026',
+  'Julio 2026',
+  'Agosto 2026',
+  'Septiembre 2026',
+  'Octubre 2026',
+  'Noviembre 2026',
+];];
 const mesActual = () =>
   `${MESES[new Date().getMonth()]} ${new Date().getFullYear()}`;
 const initials = (n) =>
