@@ -35,7 +35,7 @@ const MESES = [
   'Septiembre 2026',
   'Octubre 2026',
   'Noviembre 2026',
-];];
+];
 const mesActual = () =>
   `${MESES[new Date().getMonth()]} ${new Date().getFullYear()}`;
 const initials = (n) =>
