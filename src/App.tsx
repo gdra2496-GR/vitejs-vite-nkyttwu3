@@ -1145,7 +1145,7 @@ function MisAportes({ user, config, showToast }) {
         <div className="ct">Estado {y}</div>
         <div className="mgrid">
           {MESES.map((m, i) => {
-            const a = (aportes || []).find((ap) => ap.mes === `${m} ${y}`);
+            const a = (aportes || []).find((ap) => ap.mes === m);
             const isFuture = i > mi;
             const cls = a
               ? a.estado === 'confirmado'
