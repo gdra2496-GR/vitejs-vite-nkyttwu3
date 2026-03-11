@@ -166,6 +166,20 @@ const api = {
     const { error } = await supabase.from('ganancias').insert(g);
     if (error) throw new Error(error.message);
   },
+
+  // CAPITAL EXTRAORDINARIO
+  async getCapitalExt() {
+    const { data } = await supabase.from('capital_extraordinario').select('*').order('created_at', { ascending: false });
+    return data || [];
+  },
+  async createCapitalExt(c) {
+    const { error } = await supabase.from('capital_extraordinario').insert(c);
+    if (error) throw new Error(error.message);
+  },
+  async updateCapitalExt(id, patch) {
+    const { error } = await supabase.from('capital_extraordinario').update(patch).eq('id', id);
+    if (error) throw new Error(error.message);
+  },
 };
 
 /* ─────────────────────────────────────────────────────────────
@@ -425,6 +439,7 @@ export default function App() {
     { id: 'inversiones', icon: '📈', label: 'Inversiones' },
     { id: 'ganancias', icon: '💰', label: 'Ganancias' },
     { id: 'retiro', icon: '🚪', label: 'Retiro socio' },
+    { id: 'capital', icon: '💵', label: 'Capital Externo' },
     { id: 'config', icon: '⚙️', label: 'Configuración' },
   ];
   const memberNav = [
@@ -499,6 +514,7 @@ export default function App() {
           {tab === 'ganancias' && <Ganancias user={user} showToast={showToast} />}
           {tab === 'miembros' && user.is_admin && <AdminMiembros showToast={showToast} />}
           {tab === 'retiro' && user.is_admin && <AdminRetiro showToast={showToast} />}
+          {tab === 'capital' && user.is_admin && <AdminCapitalExt showToast={showToast} />}
           {tab === 'config' && user.is_admin && <AdminConfig config={config} setConfig={setConfig} showToast={showToast} />}
         </main>
       </div>
@@ -1753,6 +1769,161 @@ function AdminConfig({ config, setConfig, showToast }) {
         <button className="btn primary" style={{ marginTop: 16 }} onClick={guardar} disabled={saving}>
           {saving ? 'Guardando…' : 'Guardar Cambios'}
         </button>
+      </div>
+    </>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────
+   ADMIN — CAPITAL EXTRAORDINARIO
+───────────────────────────────────────────────────────────── */
+function AdminCapitalExt({ showToast }) {
+  const { data: items, refetch } = useQuery(() => api.getCapitalExt(), []);
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState({ descripcion: '', monto_total: '', origen: '', fecha: today(), notas: '' });
+  const [saving, setSaving] = useState(false);
+
+  const totalInyectado = (items || []).reduce((s, i) => s + FROM_DB(i.monto_total), 0);
+  const totalReembolsado = (items || []).reduce((s, i) => s + FROM_DB(i.monto_reembolsado), 0);
+  const totalPendiente = totalInyectado - totalReembolsado;
+
+  const crear = async () => {
+    if (!form.descripcion || !form.monto_total) { showToast('Completa descripción y monto.', 'err'); return; }
+    setSaving(true);
+    try {
+      await api.createCapitalExt({
+        descripcion: form.descripcion,
+        monto_total: parseInt(form.monto_total),
+        monto_reembolsado: 0,
+        origen: form.origen,
+        fecha: form.fecha || today(),
+        notas: form.notas,
+      });
+      setShowForm(false);
+      setForm({ descripcion: '', monto_total: '', origen: '', fecha: today(), notas: '' });
+      showToast('Capital registrado.');
+      refetch();
+    } catch (e) { showToast(e.message, 'err'); } finally { setSaving(false); }
+  };
+
+  const registrarReembolso = async (item) => {
+    const val = window.prompt(`Cuanto vas a reembolsar de "${item.descripcion}"?\nPendiente: ${COP(FROM_DB(item.monto_total) - FROM_DB(item.monto_reembolsado))}`);
+    if (!val) return;
+    const monto = parseInt(val);
+    if (!monto || monto <= 0) { showToast('Monto invalido.', 'err'); return; }
+    const nuevo = FROM_DB(item.monto_reembolsado) + monto;
+    if (nuevo > FROM_DB(item.monto_total)) { showToast('El reembolso supera el total inyectado.', 'err'); return; }
+    try {
+      await api.updateCapitalExt(item.id, { monto_reembolsado: nuevo });
+      showToast('Reembolso de ' + COP(monto) + ' registrado.');
+      refetch();
+    } catch (e) { showToast(e.message, 'err'); }
+  };
+
+  return (
+    <>
+      <div className="ph">
+        <h2>Capital Externo</h2>
+        <p>Inyecciones de capital al fondo — cadenas, anticipos y otros ingresos extraordinarios</p>
+      </div>
+
+      <div className="sg">
+        <div className="sb g"><div className="si">💵</div><div className="sl">Total inyectado</div><div className="sv">{COP(totalInyectado)}</div></div>
+        <div className="sb go"><div className="si">✅</div><div className="sl">Reembolsado</div><div className="sv">{COP(totalReembolsado)}</div></div>
+        <div className="sb r"><div className="si">⏳</div><div className="sl">Por reembolsar</div><div className="sv">{COP(totalPendiente)}</div></div>
+      </div>
+
+      <div style={{ marginBottom: 16 }}>
+        <button className="btn primary" onClick={() => setShowForm((v) => !v)}>+ Nueva Inyeccion de Capital</button>
+      </div>
+
+      {showForm && (
+        <div className="card" style={{ borderTop: '3px solid var(--gold)' }}>
+          <div className="ct">Registrar Capital Externo</div>
+          <div className="fg" style={{ marginTop: 14 }}>
+            <div className="field ff">
+              <label>Descripcion</label>
+              <input value={form.descripcion} onChange={(e) => setForm({ ...form, descripcion: e.target.value })}
+                placeholder="Cadena de ahorro puesto #2, Anticipo personal..." />
+            </div>
+            <div className="field">
+              <label>Monto total (COP)</label>
+              <input type="number" value={form.monto_total} onChange={(e) => setForm({ ...form, monto_total: e.target.value })} placeholder="1000000" />
+            </div>
+            <div className="field">
+              <label>Origen</label>
+              <input value={form.origen} onChange={(e) => setForm({ ...form, origen: e.target.value })}
+                placeholder="Cadena barrio, prestamo personal..." />
+            </div>
+            <div className="field">
+              <label>Fecha</label>
+              <input type="date" value={form.fecha} onChange={(e) => setForm({ ...form, fecha: e.target.value })} />
+            </div>
+            <div className="field ff">
+              <label>Notas adicionales</label>
+              <input value={form.notas} onChange={(e) => setForm({ ...form, notas: e.target.value })}
+                placeholder="Se reembolsa con aportes mensuales a partir de..." />
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 10, marginTop: 14 }}>
+            <button className="btn primary" onClick={crear} disabled={saving}>{saving ? 'Guardando...' : 'Registrar'}</button>
+            <button className="btn ghost" onClick={() => setShowForm(false)}>Cancelar</button>
+          </div>
+        </div>
+      )}
+
+      <div className="card">
+        <div className="ct">Historial de Capital Externo</div>
+        {!items?.length ? (
+          <div className="empty"><div className="ei">💵</div>Sin inyecciones registradas.</div>
+        ) : (
+          items.map((item) => {
+            const total = FROM_DB(item.monto_total);
+            const reembolsado = FROM_DB(item.monto_reembolsado);
+            const pendiente = total - reembolsado;
+            const pct = total > 0 ? Math.round((reembolsado / total) * 100) : 0;
+            const pagado = pendiente <= 0;
+            return (
+              <div key={item.id} style={{ padding: '18px 0', borderBottom: '1px solid var(--border)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 8 }}>
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: 15 }}>{item.descripcion}</div>
+                    <div style={{ fontSize: 12, color: 'var(--text3)', marginTop: 2 }}>
+                      {item.origen && <span>{item.origen} · </span>}{item.fecha}
+                    </div>
+                    {item.notas && <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 4 }}>{item.notas}</div>}
+                  </div>
+                  <span className={`badge ${pagado ? 'bg' : 'bgo'}`}>{pagado ? 'Reembolsado' : 'Pendiente'}</span>
+                </div>
+                <div style={{ display: 'flex', gap: 24, marginTop: 14, flexWrap: 'wrap' }}>
+                  <div>
+                    <div style={{ fontSize: 10, color: 'var(--text3)', textTransform: 'uppercase' }}>Capital inyectado</div>
+                    <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 17, fontWeight: 700 }}>{COP(total)}</div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 10, color: 'var(--text3)', textTransform: 'uppercase' }}>Reembolsado</div>
+                    <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--green2)' }}>{COP(reembolsado)}</div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 10, color: 'var(--text3)', textTransform: 'uppercase' }}>Por reembolsar</div>
+                    <div style={{ fontSize: 15, fontWeight: 600, color: pendiente > 0 ? 'var(--gold2)' : 'var(--green2)' }}>{COP(pendiente)}</div>
+                  </div>
+                </div>
+                <div style={{ marginTop: 10 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--text3)', marginBottom: 3 }}>
+                    <span>Progreso de reembolso</span><span>{pct}%</span>
+                  </div>
+                  <div className="pb"><div className="pf" style={{ width: `${pct}%` }} /></div>
+                </div>
+                {!pagado && (
+                  <button className="btn sm gold" style={{ marginTop: 12 }} onClick={() => registrarReembolso(item)}>
+                    + Registrar Reembolso
+                  </button>
+                )}
+              </div>
+            );
+          })
+        )}
       </div>
     </>
   );
