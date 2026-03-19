@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 const SUPABASE_URL = 'https://dikrihjhzoqyayibynmb.supabase.co';
@@ -1326,7 +1326,9 @@ function AdminPrestamos({ config, showToast }) {
 function Inversiones({ user, showToast }) {
   const { data: inversiones, refetch } = useQuery(() => api.getInversiones(), []);
   const [showForm, setShowForm] = useState(false);
+  const [editId, setEditId] = useState(null);
   const [form, setForm] = useState({ descripcion: '', monto: '', rendimiento_anual: '', fecha_inicio: '', fecha_fin: '' });
+  const [editForm, setEditForm] = useState({ descripcion: '', monto: '', rendimiento_anual: '', fecha_fin: '' });
   const [saving, setSaving] = useState(false);
 
   const activas = (inversiones || []).filter((i) => i.estado === 'activo');
@@ -1337,14 +1339,35 @@ function Inversiones({ user, showToast }) {
     if (!form.descripcion || !form.monto) { showToast('Completa descripción y monto.', 'err'); return; }
     setSaving(true);
     try {
-      await api.createInversion({
-        ...form,
-        monto: parseInt(form.monto),
-        rendimiento_anual: parseFloat(form.rendimiento_anual) || 0,
-      });
+      await api.createInversion({ ...form, monto: parseInt(form.monto), rendimiento_anual: parseFloat(form.rendimiento_anual) || 0 });
       setShowForm(false);
       setForm({ descripcion: '', monto: '', rendimiento_anual: '', fecha_inicio: '', fecha_fin: '' });
       showToast('Inversión registrada.');
+      refetch();
+    } catch (e) { showToast(e.message, 'err'); } finally { setSaving(false); }
+  };
+
+  const abrirEditar = (inv) => {
+    setEditId(inv.id);
+    setEditForm({
+      descripcion: inv.descripcion,
+      monto: String(FROM_DB(inv.monto)),
+      rendimiento_anual: String(inv.rendimiento_anual),
+      fecha_fin: inv.fecha_fin || '',
+    });
+  };
+
+  const guardarEdicion = async () => {
+    setSaving(true);
+    try {
+      await api.updateInversion(editId, {
+        descripcion: editForm.descripcion,
+        monto: parseInt(editForm.monto),
+        rendimiento_anual: parseFloat(editForm.rendimiento_anual) || 0,
+        fecha_fin: editForm.fecha_fin || null,
+      });
+      setEditId(null);
+      showToast('Inversión actualizada.');
       refetch();
     } catch (e) { showToast(e.message, 'err'); } finally { setSaving(false); }
   };
@@ -1392,33 +1415,55 @@ function Inversiones({ user, showToast }) {
         ) : (
           inversiones.map((inv) => {
             const ga = Math.round((FROM_DB(inv.monto) * inv.rendimiento_anual) / 100);
+            const editando = editId === inv.id;
             return (
               <div key={inv.id} style={{ padding: '16px 0', borderBottom: '1px solid var(--border)' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 8 }}>
-                  <div>
-                    <div style={{ fontWeight: 700, fontSize: 15 }}>{inv.descripcion}</div>
-                    <div style={{ fontSize: 12, color: 'var(--text3)', marginTop: 2 }}>{inv.fecha_inicio} → {inv.fecha_fin || 'Abierto'}</div>
+                {editando && user.is_admin ? (
+                  <div style={{ background: 'var(--surface2)', borderRadius: 'var(--rs)', padding: 16 }}>
+                    <div className="ct" style={{ marginBottom: 12 }}>✏️ Editar Inversión</div>
+                    <div className="fg">
+                      <div className="field ff"><label>Descripción</label><input value={editForm.descripcion} onChange={(e) => setEditForm({ ...editForm, descripcion: e.target.value })} /></div>
+                      <div className="field"><label>Monto (COP)</label><input type="number" value={editForm.monto} onChange={(e) => setEditForm({ ...editForm, monto: e.target.value })} /></div>
+                      <div className="field"><label>Rendimiento anual %</label><input type="number" step="0.1" value={editForm.rendimiento_anual} onChange={(e) => setEditForm({ ...editForm, rendimiento_anual: e.target.value })} /></div>
+                      <div className="field"><label>Fecha vencimiento</label><input type="date" value={editForm.fecha_fin} onChange={(e) => setEditForm({ ...editForm, fecha_fin: e.target.value })} /></div>
+                    </div>
+                    <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
+                      <button className="btn primary sm" onClick={guardarEdicion} disabled={saving}>{saving ? 'Guardando…' : 'Guardar'}</button>
+                      <button className="btn ghost sm" onClick={() => setEditId(null)}>Cancelar</button>
+                    </div>
                   </div>
-                  <span className={`badge ${inv.estado === 'activo' ? 'bg' : 'bgy'}`}>{inv.estado}</span>
-                </div>
-                <div style={{ display: 'flex', gap: 24, marginTop: 12, flexWrap: 'wrap' }}>
-                  <div>
-                    <div style={{ fontSize: 10, color: 'var(--text3)', textTransform: 'uppercase' }}>Capital</div>
-                    <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 17, fontWeight: 700 }}>{COP(FROM_DB(inv.monto))}</div>
-                  </div>
-                  <div>
-                    <div style={{ fontSize: 10, color: 'var(--text3)', textTransform: 'uppercase' }}>Rendimiento</div>
-                    <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--green2)' }}>{inv.rendimiento_anual}% anual</div>
-                  </div>
-                  <div>
-                    <div style={{ fontSize: 10, color: 'var(--text3)', textTransform: 'uppercase' }}>Ganancia est./año</div>
-                    <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--gold2)' }}>{COP(ga)}</div>
-                  </div>
-                </div>
-                {user.is_admin && (
-                  <button className="btn sm ghost" style={{ marginTop: 10 }} onClick={() => toggle(inv)}>
-                    {inv.estado === 'activo' ? 'Cerrar inversión' : 'Reactivar'}
-                  </button>
+                ) : (
+                  <>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 8 }}>
+                      <div>
+                        <div style={{ fontWeight: 700, fontSize: 15 }}>{inv.descripcion}</div>
+                        <div style={{ fontSize: 12, color: 'var(--text3)', marginTop: 2 }}>{inv.fecha_inicio} → {inv.fecha_fin || 'Abierto'}</div>
+                      </div>
+                      <span className={`badge ${inv.estado === 'activo' ? 'bg' : 'bgy'}`}>{inv.estado}</span>
+                    </div>
+                    <div style={{ display: 'flex', gap: 24, marginTop: 12, flexWrap: 'wrap' }}>
+                      <div>
+                        <div style={{ fontSize: 10, color: 'var(--text3)', textTransform: 'uppercase' }}>Capital</div>
+                        <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 17, fontWeight: 700 }}>{COP(FROM_DB(inv.monto))}</div>
+                      </div>
+                      <div>
+                        <div style={{ fontSize: 10, color: 'var(--text3)', textTransform: 'uppercase' }}>Rendimiento</div>
+                        <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--green2)' }}>{inv.rendimiento_anual}% anual</div>
+                      </div>
+                      <div>
+                        <div style={{ fontSize: 10, color: 'var(--text3)', textTransform: 'uppercase' }}>Ganancia est./año</div>
+                        <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--gold2)' }}>{COP(ga)}</div>
+                      </div>
+                    </div>
+                    {user.is_admin && (
+                      <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
+                        <button className="btn sm gold" onClick={() => abrirEditar(inv)}>✏️ Editar</button>
+                        <button className="btn sm ghost" onClick={() => toggle(inv)}>
+                          {inv.estado === 'activo' ? 'Cerrar inversión' : 'Reactivar'}
+                        </button>
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
             );
@@ -1435,6 +1480,8 @@ function Inversiones({ user, showToast }) {
 function Ganancias({ user, showToast }) {
   const { data: ganancias, refetch } = useQuery(() => api.getGanancias(), []);
   const [showForm, setShowForm] = useState(false);
+  const [abonoId, setAbonoId] = useState(null);
+  const [abonoMonto, setAbonoMonto] = useState('');
   const [form, setForm] = useState({ descripcion: '', monto: '', tipo: 'rendimiento' });
   const [saving, setSaving] = useState(false);
 
@@ -1444,14 +1491,11 @@ function Ganancias({ user, showToast }) {
     return acc;
   }, {});
 
-  // Últimos 6 meses del fondo para el gráfico
   const idxActual = idxMesActual();
   const startIdx = Math.max(0, idxActual - 5);
   const chartMeses = MESES_FONDO.slice(startIdx, idxActual + 1).map((m) => ({
     label: MESES_ABR[MESES_FONDO.indexOf(m)],
-    total: (ganancias || [])
-      .filter((g) => g.fecha && g.mes === m)
-      .reduce((s, g) => s + FROM_DB(g.monto), 0),
+    total: (ganancias || []).filter((g) => g.fecha && g.mes === m).reduce((s, g) => s + FROM_DB(g.monto), 0),
   }));
   const maxC = Math.max(...chartMeses.map((m) => m.total), 1);
 
@@ -1467,17 +1511,30 @@ function Ganancias({ user, showToast }) {
     } catch (e) { showToast(e.message, 'err'); } finally { setSaving(false); }
   };
 
+  const registrarAbono = async (g) => {
+    const monto = parseInt(abonoMonto);
+    if (!monto || monto <= 0) { showToast('Ingresa un monto valido.', 'err'); return; }
+    setSaving(true);
+    try {
+      await api.createGanancia({ descripcion: g.descripcion + ' — Abono', monto, tipo: g.tipo, fecha: today() });
+      setAbonoId(null);
+      setAbonoMonto('');
+      showToast('Abono registrado.');
+      refetch();
+    } catch (e) { showToast(e.message, 'err'); } finally { setSaving(false); }
+  };
+
   return (
     <>
       <div className="ph"><h2>Ganancias</h2><p>Rendimientos, intereses y otros ingresos del fondo</p></div>
       <div className="sg">
         <div className="sb g"><div className="si">💰</div><div className="sl">Total ganancias</div><div className="sv">{COP(total)}</div></div>
         <div className="sb go"><div className="si">📈</div><div className="sl">Rendimientos</div><div className="sv">{COP(porTipo.rendimiento || 0)}</div></div>
-        <div className="sb a"><div className="si">🤝</div><div className="sl">Intereses préstamos</div><div className="sv">{COP(porTipo.interes || 0)}</div></div>
+        <div className="sb a"><div className="si">🤝</div><div className="sl">Intereses prestamos</div><div className="sv">{COP(porTipo.interes || 0)}</div></div>
         <div className="sb p"><div className="si">✨</div><div className="sl">Otros</div><div className="sv">{COP(porTipo.otro || 0)}</div></div>
       </div>
       <div className="card">
-        <div className="ct">Últimos meses</div>
+        <div className="ct">Ultimos meses</div>
         <div className="cbw">
           {chartMeses.map((m) => (
             <div key={m.label} className="cbc">
@@ -1497,19 +1554,19 @@ function Ganancias({ user, showToast }) {
         <div className="card" style={{ borderTop: '3px solid var(--green)' }}>
           <div className="ct">Nueva Ganancia</div>
           <div className="fg" style={{ marginTop: 14 }}>
-            <div className="field ff"><label>Descripción</label><input value={form.descripcion} onChange={(e) => setForm({ ...form, descripcion: e.target.value })} placeholder="Rendimiento CDT trimestre 1..." /></div>
+            <div className="field ff"><label>Descripcion</label><input value={form.descripcion} onChange={(e) => setForm({ ...form, descripcion: e.target.value })} placeholder="Rendimiento CDT trimestre 1..." /></div>
             <div className="field"><label>Monto (COP)</label><input type="number" value={form.monto} onChange={(e) => setForm({ ...form, monto: e.target.value })} /></div>
             <div className="field">
               <label>Tipo</label>
               <select value={form.tipo} onChange={(e) => setForm({ ...form, tipo: e.target.value })}>
-                <option value="rendimiento">Rendimiento inversión</option>
-                <option value="interes">Interés préstamo</option>
+                <option value="rendimiento">Rendimiento inversion</option>
+                <option value="interes">Interes prestamo</option>
                 <option value="otro">Otro ingreso</option>
               </select>
             </div>
           </div>
           <div style={{ display: 'flex', gap: 10, marginTop: 14 }}>
-            <button className="btn primary" onClick={registrar} disabled={saving}>{saving ? 'Guardando…' : 'Guardar'}</button>
+            <button className="btn primary" onClick={registrar} disabled={saving}>{saving ? 'Guardando...' : 'Guardar'}</button>
             <button className="btn ghost" onClick={() => setShowForm(false)}>Cancelar</button>
           </div>
         </div>
@@ -1518,18 +1575,37 @@ function Ganancias({ user, showToast }) {
         <div className="ct">Historial de Ganancias</div>
         <div className="tw">
           <table>
-            <thead><tr><th>Descripción</th><th>Tipo</th><th>Monto</th><th>Fecha</th></tr></thead>
+            <thead><tr><th>Descripcion</th><th>Tipo</th><th>Monto</th><th>Fecha</th>{user.is_admin && <th></th>}</tr></thead>
             <tbody>
               {!ganancias?.length ? (
-                <tr><td colSpan={4}><div className="empty"><div className="ei">💰</div>Sin ganancias registradas.</div></td></tr>
+                <tr><td colSpan={5}><div className="empty"><div className="ei">💰</div>Sin ganancias registradas.</div></td></tr>
               ) : (
                 ganancias.map((g) => (
-                  <tr key={g.id}>
-                    <td style={{ fontWeight: 500 }}>{g.descripcion}</td>
-                    <td><span className={`badge ${g.tipo === 'rendimiento' ? 'bg' : g.tipo === 'interes' ? 'bb' : 'bp'}`}>{g.tipo}</span></td>
-                    <td style={{ fontWeight: 700, color: 'var(--green2)' }}>{COP(FROM_DB(g.monto))}</td>
-                    <td style={{ fontSize: 12 }}>{g.fecha}</td>
-                  </tr>
+                  <React.Fragment key={g.id}>
+                    <tr>
+                      <td style={{ fontWeight: 500 }}>{g.descripcion}</td>
+                      <td><span className={`badge ${g.tipo === 'rendimiento' ? 'bg' : g.tipo === 'interes' ? 'bb' : 'bp'}`}>{g.tipo}</span></td>
+                      <td style={{ fontWeight: 700, color: 'var(--green2)' }}>{COP(FROM_DB(g.monto))}</td>
+                      <td style={{ fontSize: 12 }}>{g.fecha}</td>
+                      {user.is_admin && (
+                        <td>
+                          <button className="btn sm gold" onClick={() => { setAbonoId(abonoId === g.id ? null : g.id); setAbonoMonto(''); }}>+ Abono</button>
+                        </td>
+                      )}
+                    </tr>
+                    {abonoId === g.id && user.is_admin && (
+                      <tr>
+                        <td colSpan={5}>
+                          <div style={{ display: 'flex', gap: 10, alignItems: 'center', padding: '8px 0', flexWrap: 'wrap' }}>
+                            <input type="number" placeholder="Monto del abono (COP)" value={abonoMonto} onChange={(e) => setAbonoMonto(e.target.value)}
+                              style={{ padding: '8px 12px', background: 'var(--surface2)', border: '1.5px solid var(--accent)', borderRadius: 'var(--rs)', color: 'var(--text)', fontSize: 13, width: 220 }} />
+                            <button className="btn sm primary" onClick={() => registrarAbono(g)} disabled={saving}>{saving ? '...' : 'Guardar abono'}</button>
+                            <button className="btn sm ghost" onClick={() => setAbonoId(null)}>Cancelar</button>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
                 ))
               )}
             </tbody>
@@ -1538,12 +1614,13 @@ function Ganancias({ user, showToast }) {
       </div>
       {!user.is_admin && (
         <div className="al info" style={{ marginTop: 4 }}>
-          ℹ️ Las ganancias se distribuyen proporcionalmente al saldo de cada socio. Tu parte estimada la ves en tu dashboard.
+          Las ganancias se distribuyen proporcionalmente al saldo de cada socio. Tu parte estimada la ves en tu dashboard.
         </div>
       )}
     </>
   );
 }
+
 
 /* ─────────────────────────────────────────────────────────────
    ADMIN — MIEMBROS
