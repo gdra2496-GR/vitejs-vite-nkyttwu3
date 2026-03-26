@@ -146,8 +146,8 @@ const api = {
     if (error) throw new Error(error.message);
     const { data } = supabase.storage.from('comprobantes').getPublicUrl(path);
     return data.publicUrl;
-  },  },
-  async getPrestamos(filter = {}) {
+   },
+   async getPrestamos(filter = {}) {
     let q = supabase.from('prestamos').select('*, miembros(nombre,cedula)').order('created_at', { ascending: false });
     if (filter.miembro_id) q = q.eq('miembro_id', filter.miembro_id);
     if (filter.estado) q = q.eq('estado', filter.estado);
