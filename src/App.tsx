@@ -124,29 +124,44 @@ const api = {
     if (error) throw new Error(error.message);
   },
   async uploadComprobante(file, miembroId) {
-    // Comprimir imagen antes de subir
-    const comprimida = await new Promise<Blob>((resolve) => {
-      const img = new Image();
-      const url = URL.createObjectURL(file);
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        const maxW = 1200;
-        const scale = Math.min(1, maxW / img.width);
-        canvas.width = img.width * scale;
-        canvas.height = img.height * scale;
-        const ctx = canvas.getContext('2d')!;
-        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-        canvas.toBlob((blob) => resolve(blob!), 'image/jpeg', 0.7);
-        URL.revokeObjectURL(url);
-      };
-      img.src = url;
-    });
-    const path = `${miembroId}/${Date.now()}.jpg`;
-    const { error } = await supabase.storage.from('comprobantes').upload(path, comprimida, { contentType: 'image/jpeg' });
+    // Intentar comprimir, si falla usar archivo original
+    let fileToUpload = file;
+    try {
+      const comprimida = await new Promise<Blob>((resolve, reject) => {
+        const img = new Image();
+        const url = URL.createObjectURL(file);
+        img.onload = () => {
+          try {
+            const canvas = document.createElement('canvas');
+            const maxW = 1200;
+            const scale = Math.min(1, maxW / img.width);
+            canvas.width = img.width * scale;
+            canvas.height = img.height * scale;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) { reject(new Error('no ctx')); return; }
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+            canvas.toBlob((blob) => {
+              if (blob) resolve(blob);
+              else reject(new Error('no blob'));
+            }, 'image/jpeg', 0.7);
+          } catch(e) { reject(e); }
+          URL.revokeObjectURL(url);
+        };
+        img.onerror = () => reject(new Error('img error'));
+        img.src = url;
+      });
+      fileToUpload = comprimida;
+    } catch(_) {
+      // Si falla la compresión, usar el archivo original
+      fileToUpload = file;
+    }
+    const ext = fileToUpload instanceof Blob && !(fileToUpload instanceof File) ? 'jpg' : file.name.split('.').pop();
+    const path = `${miembroId}/${Date.now()}.${ext}`;
+    const { error } = await supabase.storage.from('comprobantes').upload(path, fileToUpload, { contentType: 'image/jpeg' });
     if (error) throw new Error(error.message);
     const { data } = supabase.storage.from('comprobantes').getPublicUrl(path);
     return data.publicUrl;
-   },
+  },
    async getPrestamos(filter = {}) {
     let q = supabase.from('prestamos').select('*, miembros(nombre,cedula)').order('created_at', { ascending: false });
     if (filter.miembro_id) q = q.eq('miembro_id', filter.miembro_id);
@@ -853,7 +868,6 @@ function MisAportes({ user, config, showToast }) {
       setSaving(false);
     }
   };
-
   return (
     <>
       <div className="ph">
