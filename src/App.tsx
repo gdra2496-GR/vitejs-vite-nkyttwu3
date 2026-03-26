@@ -124,13 +124,29 @@ const api = {
     if (error) throw new Error(error.message);
   },
   async uploadComprobante(file, miembroId) {
-    const ext = file.name.split('.').pop();
-    const path = `${miembroId}/${Date.now()}.${ext}`;
-    const { error } = await supabase.storage.from('comprobantes').upload(path, file);
+    // Comprimir imagen antes de subir
+    const comprimida = await new Promise<Blob>((resolve) => {
+      const img = new Image();
+      const url = URL.createObjectURL(file);
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const maxW = 1200;
+        const scale = Math.min(1, maxW / img.width);
+        canvas.width = img.width * scale;
+        canvas.height = img.height * scale;
+        const ctx = canvas.getContext('2d')!;
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        canvas.toBlob((blob) => resolve(blob!), 'image/jpeg', 0.7);
+        URL.revokeObjectURL(url);
+      };
+      img.src = url;
+    });
+    const path = `${miembroId}/${Date.now()}.jpg`;
+    const { error } = await supabase.storage.from('comprobantes').upload(path, comprimida, { contentType: 'image/jpeg' });
     if (error) throw new Error(error.message);
     const { data } = supabase.storage.from('comprobantes').getPublicUrl(path);
     return data.publicUrl;
-  },
+  },  },
   async getPrestamos(filter = {}) {
     let q = supabase.from('prestamos').select('*, miembros(nombre,cedula)').order('created_at', { ascending: false });
     if (filter.miembro_id) q = q.eq('miembro_id', filter.miembro_id);
