@@ -124,45 +124,14 @@ const api = {
     if (error) throw new Error(error.message);
   },
   async uploadComprobante(file, miembroId) {
-    // Intentar comprimir, si falla usar archivo original
-    let fileToUpload = file;
-    try {
-      const comprimida = await new Promise<Blob>((resolve, reject) => {
-        const img = new Image();
-        const url = URL.createObjectURL(file);
-        img.onload = () => {
-          try {
-            const canvas = document.createElement('canvas');
-            const maxW = 1200;
-            const scale = Math.min(1, maxW / img.width);
-            canvas.width = img.width * scale;
-            canvas.height = img.height * scale;
-            const ctx = canvas.getContext('2d');
-            if (!ctx) { reject(new Error('no ctx')); return; }
-            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-            canvas.toBlob((blob) => {
-              if (blob) resolve(blob);
-              else reject(new Error('no blob'));
-            }, 'image/jpeg', 0.7);
-          } catch(e) { reject(e); }
-          URL.revokeObjectURL(url);
-        };
-        img.onerror = () => reject(new Error('img error'));
-        img.src = url;
-      });
-      fileToUpload = comprimida;
-    } catch(_) {
-      // Si falla la compresión, usar el archivo original
-      fileToUpload = file;
-    }
-    const ext = fileToUpload instanceof Blob && !(fileToUpload instanceof File) ? 'jpg' : file.name.split('.').pop();
+    const ext = file.name.split('.').pop();
     const path = `${miembroId}/${Date.now()}.${ext}`;
-    const { error } = await supabase.storage.from('comprobantes').upload(path, fileToUpload, { contentType: 'image/jpeg' });
+    const { error } = await supabase.storage.from('comprobantes').upload(path, file);
     if (error) throw new Error(error.message);
     const { data } = supabase.storage.from('comprobantes').getPublicUrl(path);
     return data.publicUrl;
   },
-   async getPrestamos(filter = {}) {
+  async getPrestamos(filter = {}) {
     let q = supabase.from('prestamos').select('*, miembros(nombre,cedula)').order('created_at', { ascending: false });
     if (filter.miembro_id) q = q.eq('miembro_id', filter.miembro_id);
     if (filter.estado) q = q.eq('estado', filter.estado);
@@ -195,6 +164,20 @@ const api = {
   },
   async createGanancia(g) {
     const { error } = await supabase.from('ganancias').insert(g);
+    if (error) throw new Error(error.message);
+  },
+
+  // ALIANZAS
+  async getAlianzas() {
+    const { data } = await supabase.from('alianzas').select('*').order('created_at', { ascending: false });
+    return data || [];
+  },
+  async createAlianza(a) {
+    const { error } = await supabase.from('alianzas').insert(a);
+    if (error) throw new Error(error.message);
+  },
+  async updateAlianza(id, patch) {
+    const { error } = await supabase.from('alianzas').update(patch).eq('id', id);
     if (error) throw new Error(error.message);
   },
 
@@ -471,6 +454,7 @@ export default function App() {
     { id: 'ganancias', icon: '💰', label: 'Ganancias' },
     { id: 'retiro', icon: '🚪', label: 'Retiro socio' },
     { id: 'capital', icon: '💵', label: 'Capital Externo' },
+    { id: 'alianzas', icon: '🤜', label: 'Alianzas' },
     { id: 'config', icon: '⚙️', label: 'Configuración' },
   ];
   const memberNav = [
@@ -479,6 +463,7 @@ export default function App() {
     { id: 'prestamos', icon: '🤝', label: 'Mis Préstamos' },
     { id: 'inversiones', icon: '📈', label: 'Inversiones' },
     { id: 'ganancias', icon: '💰', label: 'Ganancias' },
+    { id: 'alianzas', icon: '🤜', label: 'Alianzas' },
   ];
   const navItems = user?.is_admin ? adminNav : memberNav;
 
@@ -546,6 +531,7 @@ export default function App() {
           {tab === 'miembros' && user.is_admin && <AdminMiembros showToast={showToast} />}
           {tab === 'retiro' && user.is_admin && <AdminRetiro showToast={showToast} />}
           {tab === 'capital' && user.is_admin && <AdminCapitalExt showToast={showToast} />}
+          {tab === 'alianzas' && <Alianzas user={user} showToast={showToast} />}
           {tab === 'config' && user.is_admin && <AdminConfig config={config} setConfig={setConfig} showToast={showToast} />}
         </main>
       </div>
@@ -868,6 +854,7 @@ function MisAportes({ user, config, showToast }) {
       setSaving(false);
     }
   };
+
   return (
     <>
       <div className="ph">
@@ -2032,6 +2019,148 @@ function AdminCapitalExt({ showToast }) {
           })
         )}
       </div>
+    </>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────
+   ALIANZAS
+───────────────────────────────────────────────────────────── */
+function Alianzas({ user, showToast }) {
+  const { data: alianzas, refetch } = useQuery(() => api.getAlianzas(), []);
+  const [showForm, setShowForm] = useState(false);
+  const [editId, setEditId] = useState(null);
+  const [codigoVisible, setCodigoVisible] = useState(null);
+  const [form, setForm] = useState({ nombre: '', descripcion: '', descuento: '', codigo: '', categoria: '', logo_url: '' });
+  const [saving, setSaving] = useState(false);
+
+  const activas = (alianzas || []).filter(a => a.activo);
+  const categorias = [...new Set((alianzas || []).map(a => a.categoria).filter(Boolean))];
+
+  const crear = async () => {
+    if (!form.nombre || !form.descuento) { showToast('Nombre y descuento son obligatorios.', 'err'); return; }
+    setSaving(true);
+    try {
+      await api.createAlianza({ ...form, activo: true });
+      setShowForm(false);
+      setForm({ nombre: '', descripcion: '', descuento: '', codigo: '', categoria: '', logo_url: '' });
+      showToast('Alianza registrada.');
+      refetch();
+    } catch (e) { showToast(e.message, 'err'); } finally { setSaving(false); }
+  };
+
+  const toggleActivo = async (a) => {
+    try {
+      await api.updateAlianza(a.id, { activo: !a.activo });
+      showToast(`Alianza ${!a.activo ? 'activada' : 'desactivada'}.`);
+      refetch();
+    } catch (e) { showToast(e.message, 'err'); }
+  };
+
+  const abrirEditar = (a) => {
+    setEditId(a.id);
+    setForm({ nombre: a.nombre, descripcion: a.descripcion || '', descuento: a.descuento || '', codigo: a.codigo || '', categoria: a.categoria || '', logo_url: a.logo_url || '' });
+    setShowForm(true);
+  };
+
+  const guardarEdicion = async () => {
+    setSaving(true);
+    try {
+      await api.updateAlianza(editId, form);
+      setShowForm(false);
+      setEditId(null);
+      setForm({ nombre: '', descripcion: '', descuento: '', codigo: '', categoria: '', logo_url: '' });
+      showToast('Alianza actualizada.');
+      refetch();
+    } catch (e) { showToast(e.message, 'err'); } finally { setSaving(false); }
+  };
+
+  const cancelar = () => { setShowForm(false); setEditId(null); setForm({ nombre: '', descripcion: '', descuento: '', codigo: '', categoria: '', logo_url: '' }); };
+
+  return (
+    <>
+      <div className="ph">
+        <h2>🤜 Alianzas</h2>
+        <p>Beneficios y descuentos exclusivos para socios del fondo</p>
+      </div>
+
+      {activas.length > 0 && (
+        <div className="al ok" style={{ marginBottom: 16 }}>
+          🎉 Tienes acceso a <strong>{activas.length} alianza(s)</strong> con descuentos exclusivos por ser socio del fondo.
+        </div>
+      )}
+
+      {user.is_admin && (
+        <div style={{ marginBottom: 16 }}>
+          <button className="btn primary" onClick={() => { cancelar(); setShowForm(v => !v); }}>
+            {showForm && !editId ? 'Cancelar' : '+ Nueva Alianza'}
+          </button>
+        </div>
+      )}
+
+      {showForm && user.is_admin && (
+        <div className="card" style={{ borderTop: '3px solid var(--gold)' }}>
+          <div className="ct">{editId ? 'Editar Alianza' : 'Nueva Alianza'}</div>
+          <div className="fg" style={{ marginTop: 14 }}>
+            <div className="field"><label>Nombre del negocio</label><input value={form.nombre} onChange={e => setForm({ ...form, nombre: e.target.value })} placeholder="Restaurante La Palma, Peluqueria Style..." /></div>
+            <div className="field"><label>Categoria</label><input value={form.categoria} onChange={e => setForm({ ...form, categoria: e.target.value })} placeholder="Restaurante, Salud, Moda, Tecnologia..." /></div>
+            <div className="field ff"><label>Descripcion del beneficio</label><input value={form.descripcion} onChange={e => setForm({ ...form, descripcion: e.target.value })} placeholder="10% de descuento en todos los platos del menu..." /></div>
+            <div className="field"><label>Descuento</label><input value={form.descuento} onChange={e => setForm({ ...form, descuento: e.target.value })} placeholder="10%, 2x1, $20.000 off..." /></div>
+            <div className="field"><label>Codigo exclusivo</label><input value={form.codigo} onChange={e => setForm({ ...form, codigo: e.target.value })} placeholder="CASHDAVE10, FONDO2026..." /></div>
+            <div className="field ff"><label>URL del logo (opcional)</label><input value={form.logo_url} onChange={e => setForm({ ...form, logo_url: e.target.value })} placeholder="https://..." /></div>
+          </div>
+          <div style={{ display: 'flex', gap: 10, marginTop: 14 }}>
+            <button className="btn primary" onClick={editId ? guardarEdicion : crear} disabled={saving}>{saving ? 'Guardando...' : editId ? 'Guardar cambios' : 'Registrar alianza'}</button>
+            <button className="btn ghost" onClick={cancelar}>Cancelar</button>
+          </div>
+        </div>
+      )}
+
+      {!alianzas?.length ? (
+        <div className="card"><div className="empty"><div className="ei">🤝</div>Pronto tendremos alianzas y descuentos exclusivos para ti.</div></div>
+      ) : (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 16 }}>
+          {alianzas.map(a => (
+            <div key={a.id} className="card" style={{ opacity: a.activo ? 1 : 0.5, borderTop: `3px solid ${a.activo ? 'var(--gold)' : 'var(--border)'}`, padding: 20 }}>
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, marginBottom: 12 }}>
+                {a.logo_url ? (
+                  <img src={a.logo_url} alt={a.nombre} style={{ width: 48, height: 48, borderRadius: 10, objectFit: 'cover', border: '1px solid var(--border)', flexShrink: 0 }} />
+                ) : (
+                  <div style={{ width: 48, height: 48, borderRadius: 10, background: 'linear-gradient(135deg, var(--gold), var(--accent))', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22, flexShrink: 0 }}>🏪</div>
+                )}
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 700, fontSize: 15 }}>{a.nombre}</div>
+                  {a.categoria && <span className="badge bgo" style={{ marginTop: 4, fontSize: 10 }}>{a.categoria}</span>}
+                </div>
+                <div style={{ background: 'var(--gold)', color: '#000', fontWeight: 800, fontSize: 13, padding: '4px 10px', borderRadius: 20, flexShrink: 0 }}>{a.descuento}</div>
+              </div>
+
+              {a.descripcion && <p style={{ fontSize: 13, color: 'var(--text2)', marginBottom: 14, lineHeight: 1.5 }}>{a.descripcion}</p>}
+
+              {a.codigo && (
+                <div style={{ background: 'var(--surface2)', border: '1.5px dashed var(--gold)', borderRadius: 'var(--rs)', padding: '10px 14px', marginBottom: 12 }}>
+                  <div style={{ fontSize: 10, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 4 }}>Codigo exclusivo socio</div>
+                  {codigoVisible === a.id ? (
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                      <span style={{ fontFamily: 'monospace', fontWeight: 800, fontSize: 18, color: 'var(--gold2)', letterSpacing: '0.1em' }}>{a.codigo}</span>
+                      <button className="btn sm ghost" onClick={() => { navigator.clipboard?.writeText(a.codigo); showToast('Codigo copiado!'); }}>Copiar</button>
+                    </div>
+                  ) : (
+                    <button className="btn sm gold" style={{ width: '100%' }} onClick={() => setCodigoVisible(a.id)}>🔓 Ver mi codigo</button>
+                  )}
+                </div>
+              )}
+
+              {user.is_admin && (
+                <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                  <button className="btn sm ghost" onClick={() => abrirEditar(a)}>✏️ Editar</button>
+                  <button className={`btn sm ${a.activo ? 'danger' : 'success'}`} onClick={() => toggleActivo(a)}>{a.activo ? 'Desactivar' : 'Activar'}</button>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
     </>
   );
 }
