@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import NotificacionesBtn from './NotificacionesBtn';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 const SUPABASE_URL = 'https://dikrihjhzoqyayibynmb.supabase.co';
@@ -664,6 +665,7 @@ function MemberDash({ user, config }) {
           </div>
         </div>
       </div>
+      <NotificacionesBtn miembroId={user.id} />
 
       <div className="sg">
         <div className="sb go">
