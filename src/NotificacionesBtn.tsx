@@ -7,7 +7,7 @@ const supabase = createClient(
 );
 
 const VAPID_PUBLIC_KEY =
-  'UBtNph6pdztdA5GZMlxJ_gjkrwQFbfIY_lkSaZwfQ6KZiwbk1CpGdCsAOYAlq8BS76qbd-Y-_7Knmt76EuGlGHc';
+  'BLVOqIzv01i6QNeIFqHNuA3lTLYt_aWfdx9D_tstsFLm6xTKzenJnBcaxtDlKHAsxtJQO6kP0dsfqw2fuFmPZ7g';
 
 function urlBase64ToUint8Array(base64String: string): Uint8Array {
   const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
