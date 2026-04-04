@@ -2491,7 +2491,7 @@ function Merch({ user, showToast, setLight }) {
   const [saving, setSaving] = useState(false);
   const fileRef = useRef();
 
-  const WHATSAPP_ADMIN = '573102936563'; // Cambia por el numero del admin
+  const WHATSAPP_ADMIN = '573001234567'; // Cambia por el numero del admin
 
   const disponibles = (productos || []).filter(p => p.disponible);
 
@@ -2623,48 +2623,68 @@ function Merch({ user, showToast, setLight }) {
       )}
 
       {!disponibles.length && !user.is_admin ? (
-        <div className="card"><div className="empty"><div className="ei">👕</div>Pronto tendreemos merch exclusivo disponible!</div></div>
+        <div className="card"><div className="empty"><div className="ei">👕</div>Pronto tendremos merch exclusivo disponible!</div></div>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 16 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 3 }}>
           {(productos || []).map(p => (
-            <div key={p.id} className="card" style={{ padding: 0, overflow: 'hidden', opacity: p.disponible ? 1 : 0.5 }}>
+            <div key={p.id} style={{ position: 'relative', aspectRatio: '1', overflow: 'hidden', cursor: 'pointer', opacity: p.disponible ? 1 : 0.5 }}
+              onClick={() => setLight(p.foto_url || null)}>
               {p.foto_url ? (
-                <img src={p.foto_url} alt={p.nombre}
-                  style={{ width: '100%', height: 200, objectFit: 'cover', cursor: 'zoom-in' }}
-                  onClick={() => setLight(p.foto_url)} />
+                <img src={p.foto_url} alt={p.nombre} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
               ) : (
-                <div style={{ width: '100%', height: 200, background: 'linear-gradient(135deg, var(--surface2), var(--border))', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 48 }}>👕</div>
+                <div style={{ width: '100%', height: '100%', background: 'linear-gradient(135deg, #f1f5f9, #e2e8f0)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 40 }}>👕</div>
               )}
-              <div style={{ padding: 16 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
-                  <div>
-                    <div style={{ fontWeight: 700, fontSize: 15 }}>{p.nombre}</div>
-                    {!p.disponible && <span className="badge br" style={{ marginTop: 4, fontSize: 10 }}>Sin stock</span>}
-                  </div>
-                  <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 18, fontWeight: 700, color: 'var(--gold2)' }}>{COP(p.precio)}</div>
-                </div>
-                {p.descripcion && <p style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 10, lineHeight: 1.5 }}>{p.descripcion}</p>}
-                <div style={{ display: 'flex', gap: 12, marginBottom: 12, flexWrap: 'wrap' }}>
-                  {p.tallas && <div style={{ fontSize: 11, color: 'var(--text3)' }}>📐 {p.tallas}</div>}
-                  {p.colores && <div style={{ fontSize: 11, color: 'var(--text3)' }}>🎨 {p.colores}</div>}
-                  {p.stock > 0 && <div style={{ fontSize: 11, color: 'var(--text3)' }}>📦 {p.stock} disponibles</div>}
-                </div>
-                {p.disponible && (
-                  <button className="btn primary" style={{ width: '100%' }} onClick={() => pedirPorWhatsApp(p)}>
-                    💬 Pedir por WhatsApp
-                  </button>
-                )}
-                {user.is_admin && (
-                  <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-                    <button className="btn sm ghost" onClick={() => abrirEditar(p)}>✏️ Editar</button>
-                    <button className={`btn sm ${p.disponible ? 'danger' : 'success'}`} onClick={() => toggleDisponible(p)}>{p.disponible ? 'Desactivar' : 'Activar'}</button>
-                  </div>
-                )}
+              {/* Overlay al hacer hover */}
+              <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 8, opacity: 0, transition: 'opacity .2s' }}
+                onMouseEnter={e => e.currentTarget.style.opacity = '1'}
+                onMouseLeave={e => e.currentTarget.style.opacity = '0'}>
+                <div style={{ color: '#fff', fontWeight: 700, fontSize: 13, textAlign: 'center', marginBottom: 4 }}>{p.nombre}</div>
+                <div style={{ color: '#fbbf24', fontWeight: 800, fontSize: 14 }}>{COP(p.precio)}</div>
               </div>
+              {/* Badge sin stock */}
+              {!p.disponible && (
+                <div style={{ position: 'absolute', top: 6, right: 6, background: 'rgba(239,68,68,0.9)', color: '#fff', fontSize: 9, fontWeight: 700, padding: '2px 6px', borderRadius: 10 }}>Sin stock</div>
+              )}
             </div>
           ))}
         </div>
       )}
+
+      {/* Detalle móvil — lista de productos con botón de pedir */}
+      <div style={{ marginTop: 20 }}>
+        {(productos || []).filter(p => p.disponible || user.is_admin).map(p => (
+          <div key={p.id} style={{ display: 'flex', gap: 14, padding: '14px 0', borderBottom: '1px solid var(--border)', alignItems: 'center' }}>
+            {p.foto_url ? (
+              <img src={p.foto_url} alt={p.nombre} style={{ width: 64, height: 64, borderRadius: 10, objectFit: 'cover', flexShrink: 0, border: '1px solid var(--border)' }} />
+            ) : (
+              <div style={{ width: 64, height: 64, borderRadius: 10, background: 'linear-gradient(135deg, #f1f5f9, #e2e8f0)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 28, flexShrink: 0 }}>👕</div>
+            )}
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontWeight: 700, fontSize: 14 }}>{p.nombre}</div>
+              {p.descripcion && <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 2 }}>{p.descripcion}</div>}
+              <div style={{ display: 'flex', gap: 10, marginTop: 4, flexWrap: 'wrap' }}>
+                {p.tallas && <span style={{ fontSize: 11, color: 'var(--text3)' }}>📐 {p.tallas}</span>}
+                {p.colores && <span style={{ fontSize: 11, color: 'var(--text3)' }}>🎨 {p.colores}</span>}
+                {p.stock > 0 && <span style={{ fontSize: 11, color: 'var(--green2)' }}>📦 {p.stock} uds</span>}
+              </div>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 8, flexShrink: 0 }}>
+              <div style={{ fontFamily: "'Playfair Display',serif", fontWeight: 800, fontSize: 16, color: 'var(--gold2)' }}>{COP(p.precio)}</div>
+              {p.disponible ? (
+                <button className="btn sm primary" onClick={() => pedirPorWhatsApp(p)}>💬 Pedir</button>
+              ) : (
+                <span className="badge br" style={{ fontSize: 10 }}>Sin stock</span>
+              )}
+              {user.is_admin && (
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <button className="btn sm ghost" onClick={() => abrirEditar(p)}>✏️</button>
+                  <button className={`btn sm ${p.disponible ? 'danger' : 'success'}`} onClick={() => toggleDisponible(p)}>{p.disponible ? 'Off' : 'On'}</button>
+                </div>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
     </>
   );
 }
