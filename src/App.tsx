@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import NotificacionesBtn from './NotificacionesBtn';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 const SUPABASE_URL = 'https://dikrihjhzoqyayibynmb.supabase.co';
@@ -179,6 +178,34 @@ const api = {
   },
   async updateAlianza(id, patch) {
     const { error } = await supabase.from('alianzas').update(patch).eq('id', id);
+    if (error) throw new Error(error.message);
+  },
+
+  // NOTICIAS
+  async getNoticias() {
+    const { data } = await supabase.from('noticias').select('*, miembros(nombre)').order('created_at', { ascending: false });
+    return data || [];
+  },
+  async createNoticia(n) {
+    const { error } = await supabase.from('noticias').insert(n);
+    if (error) throw new Error(error.message);
+  },
+  async updateNoticia(id, patch) {
+    const { error } = await supabase.from('noticias').update(patch).eq('id', id);
+    if (error) throw new Error(error.message);
+  },
+
+  // EVENTOS
+  async getEventos() {
+    const { data } = await supabase.from('eventos').select('*, miembros(nombre)').order('fecha_evento', { ascending: true });
+    return data || [];
+  },
+  async createEvento(e) {
+    const { error } = await supabase.from('eventos').insert(e);
+    if (error) throw new Error(error.message);
+  },
+  async updateEvento(id, patch) {
+    const { error } = await supabase.from('eventos').update(patch).eq('id', id);
     if (error) throw new Error(error.message);
   },
 
@@ -456,6 +483,8 @@ export default function App() {
     { id: 'retiro', icon: '🚪', label: 'Retiro socio' },
     { id: 'capital', icon: '💵', label: 'Capital Externo' },
     { id: 'alianzas', icon: '🤜', label: 'Alianzas' },
+    { id: 'noticias', icon: '📰', label: 'Noticias' },
+    { id: 'eventos', icon: '🗓️', label: 'Eventos' },
     { id: 'config', icon: '⚙️', label: 'Configuración' },
   ];
   const memberNav = [
@@ -465,6 +494,8 @@ export default function App() {
     { id: 'inversiones', icon: '📈', label: 'Inversiones' },
     { id: 'ganancias', icon: '💰', label: 'Ganancias' },
     { id: 'alianzas', icon: '🤜', label: 'Alianzas' },
+    { id: 'noticias', icon: '📰', label: 'Noticias' },
+    { id: 'eventos', icon: '🗓️', label: 'Eventos' },
   ];
   const navItems = user?.is_admin ? adminNav : memberNav;
 
@@ -533,6 +564,8 @@ export default function App() {
           {tab === 'retiro' && user.is_admin && <AdminRetiro showToast={showToast} />}
           {tab === 'capital' && user.is_admin && <AdminCapitalExt showToast={showToast} />}
           {tab === 'alianzas' && <Alianzas user={user} showToast={showToast} />}
+          {tab === 'noticias' && <Noticias user={user} showToast={showToast} setLight={setLight} />}
+          {tab === 'eventos' && <Eventos user={user} showToast={showToast} setLight={setLight} />}
           {tab === 'config' && user.is_admin && <AdminConfig config={config} setConfig={setConfig} showToast={showToast} />}
         </main>
       </div>
@@ -665,7 +698,6 @@ function MemberDash({ user, config }) {
           </div>
         </div>
       </div>
-      <NotificacionesBtn miembroId={user.id} />
 
       <div className="sg">
         <div className="sb go">
@@ -2162,6 +2194,268 @@ function Alianzas({ user, showToast }) {
             </div>
           ))}
         </div>
+      )}
+    </>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────
+   NOTICIAS
+───────────────────────────────────────────────────────────── */
+function Noticias({ user, showToast, setLight }) {
+  const { data: noticias, refetch } = useQuery(() => api.getNoticias(), []);
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState({ titulo: '', contenido: '' });
+  const [file, setFile] = useState(null);
+  const [preview, setPreview] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const fileRef = useRef();
+
+  const handleFile = (f) => {
+    if (!f || !f.type.startsWith('image/')) return;
+    setFile(f);
+    const r = new FileReader();
+    r.onload = (e) => setPreview(e.target.result);
+    r.readAsDataURL(f);
+  };
+
+  const publicar = async () => {
+    if (!form.titulo) { showToast('El titulo es obligatorio.', 'err'); return; }
+    setSaving(true);
+    try {
+      let foto_url = null;
+      if (file) {
+        foto_url = await api.uploadComprobante(file, user.id);
+      }
+      await api.createNoticia({ titulo: form.titulo, contenido: form.contenido, foto_url, autor_id: user.id, activo: true });
+      setShowForm(false);
+      setForm({ titulo: '', contenido: '' });
+      setFile(null);
+      setPreview(null);
+      showToast('Noticia publicada.');
+      refetch();
+    } catch (e) { showToast(e.message, 'err'); } finally { setSaving(false); }
+  };
+
+  const eliminar = async (n) => {
+    if (!window.confirm('Eliminar esta noticia?')) return;
+    try {
+      await api.updateNoticia(n.id, { activo: false });
+      showToast('Noticia eliminada.');
+      refetch();
+    } catch (e) { showToast(e.message, 'err'); }
+  };
+
+  const activas = (noticias || []).filter(n => n.activo);
+
+  return (
+    <>
+      <div className="ph">
+        <h2>📰 Noticias</h2>
+        <p>Fotos y novedades del fondo solidario</p>
+      </div>
+
+      <div style={{ marginBottom: 16 }}>
+        <button className="btn primary" onClick={() => setShowForm(v => !v)}>
+          {showForm ? 'Cancelar' : '+ Publicar noticia'}
+        </button>
+      </div>
+
+      {showForm && (
+        <div className="card" style={{ borderTop: '3px solid var(--accent)' }}>
+          <div className="ct">Nueva Noticia</div>
+          <div className="fg" style={{ marginTop: 14 }}>
+            <div className="field ff">
+              <label>Titulo</label>
+              <input value={form.titulo} onChange={e => setForm({ ...form, titulo: e.target.value })} placeholder="Reunion mensual, Evento de recaudacion..." />
+            </div>
+            <div className="field ff">
+              <label>Contenido</label>
+              <textarea value={form.contenido} onChange={e => setForm({ ...form, contenido: e.target.value })}
+                placeholder="Describe lo que paso, comparte los detalles del evento..."
+                style={{ minHeight: 80, resize: 'vertical', width: '100%', padding: '11px 14px', background: 'var(--surface2)', border: '1.5px solid var(--border)', borderRadius: 'var(--rs)', color: 'var(--text)', fontSize: 14, outline: 'none' }} />
+            </div>
+            <div className="field ff">
+              <label>Foto (opcional)</label>
+              <div className="uz" onClick={() => fileRef.current.click()} style={{ padding: 16 }}>
+                <div className="ui">{preview ? '✅' : '📷'}</div>
+                <p>{preview ? <strong style={{ color: 'var(--green2)' }}>Imagen lista</strong> : <><strong>Toca</strong> para agregar foto</>}</p>
+                <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={e => handleFile(e.target.files[0])} />
+              </div>
+              {preview && <img src={preview} className="prev" alt="preview" />}
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 10, marginTop: 14 }}>
+            <button className="btn primary" onClick={publicar} disabled={saving}>{saving ? 'Publicando...' : 'Publicar'}</button>
+            <button className="btn ghost" onClick={() => { setShowForm(false); setFile(null); setPreview(null); }}>Cancelar</button>
+          </div>
+        </div>
+      )}
+
+      {!activas.length ? (
+        <div className="card"><div className="empty"><div className="ei">📰</div>Aun no hay noticias. Se el primero en publicar!</div></div>
+      ) : (
+        activas.map(n => (
+          <div key={n.id} className="card" style={{ padding: 0, overflow: 'hidden' }}>
+            {n.foto_url && (
+              <img src={n.foto_url} alt={n.titulo}
+                style={{ width: '100%', maxHeight: 280, objectFit: 'cover', cursor: 'zoom-in' }}
+                onClick={() => setLight(n.foto_url)} />
+            )}
+            <div style={{ padding: 20 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8, marginBottom: 8 }}>
+                <h3 style={{ fontFamily: "'Playfair Display',serif", fontSize: 17, fontWeight: 700 }}>{n.titulo}</h3>
+                {(user.is_admin || user.id === n.autor_id) && (
+                  <button className="btn sm danger" onClick={() => eliminar(n)}>🗑</button>
+                )}
+              </div>
+              {n.contenido && <p style={{ fontSize: 14, color: 'var(--text2)', lineHeight: 1.6, marginBottom: 12 }}>{n.contenido}</p>}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div style={{ width: 28, height: 28, borderRadius: '50%', background: 'linear-gradient(135deg, var(--accent), var(--purple))', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700 }}>
+                  {initials(n.miembros?.nombre || '?')}
+                </div>
+                <span style={{ fontSize: 12, color: 'var(--text3)' }}>{n.miembros?.nombre} · {new Date(n.created_at).toLocaleDateString('es-CO', { day: 'numeric', month: 'long', year: 'numeric' })}</span>
+              </div>
+            </div>
+          </div>
+        ))
+      )}
+    </>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────
+   EVENTOS
+───────────────────────────────────────────────────────────── */
+function Eventos({ user, showToast, setLight }) {
+  const { data: eventos, refetch } = useQuery(() => api.getEventos(), []);
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState({ titulo: '', descripcion: '', fecha_evento: '', lugar: '' });
+  const [file, setFile] = useState(null);
+  const [preview, setPreview] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const fileRef = useRef();
+
+  const handleFile = (f) => {
+    if (!f || !f.type.startsWith('image/')) return;
+    setFile(f);
+    const r = new FileReader();
+    r.onload = (e) => setPreview(e.target.result);
+    r.readAsDataURL(f);
+  };
+
+  const publicar = async () => {
+    if (!form.titulo || !form.fecha_evento) { showToast('Titulo y fecha son obligatorios.', 'err'); return; }
+    setSaving(true);
+    try {
+      let foto_url = null;
+      if (file) foto_url = await api.uploadComprobante(file, user.id);
+      await api.createEvento({ ...form, foto_url, autor_id: user.id, activo: true });
+      setShowForm(false);
+      setForm({ titulo: '', descripcion: '', fecha_evento: '', lugar: '' });
+      setFile(null);
+      setPreview(null);
+      showToast('Evento publicado.');
+      refetch();
+    } catch (e) { showToast(e.message, 'err'); } finally { setSaving(false); }
+  };
+
+  const eliminar = async (e) => {
+    if (!window.confirm('Eliminar este evento?')) return;
+    try {
+      await api.updateEvento(e.id, { activo: false });
+      showToast('Evento eliminado.');
+      refetch();
+    } catch (e) { showToast(e.message, 'err'); }
+  };
+
+  const hoy = today();
+  const activos = (eventos || []).filter(e => e.activo);
+  const proximos = activos.filter(e => e.fecha_evento >= hoy);
+  const pasados = activos.filter(e => e.fecha_evento < hoy);
+
+  const CardEvento = ({ e }) => (
+    <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+      {e.foto_url && (
+        <img src={e.foto_url} alt={e.titulo} style={{ width: '100%', maxHeight: 220, objectFit: 'cover', cursor: 'zoom-in' }} onClick={() => setLight(e.foto_url)} />
+      )}
+      <div style={{ padding: 20 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8, marginBottom: 10 }}>
+          <div>
+            <h3 style={{ fontFamily: "'Playfair Display',serif", fontSize: 16, fontWeight: 700 }}>{e.titulo}</h3>
+            <div style={{ display: 'flex', gap: 10, marginTop: 6, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 12, color: 'var(--accent2)' }}>📅 {new Date(e.fecha_evento + 'T12:00:00').toLocaleDateString('es-CO', { weekday: 'long', day: 'numeric', month: 'long' })}</span>
+              {e.lugar && <span style={{ fontSize: 12, color: 'var(--text3)' }}>📍 {e.lugar}</span>}
+            </div>
+          </div>
+          {(user.is_admin || user.id === e.autor_id) && (
+            <button className="btn sm danger" onClick={() => eliminar(e)}>🗑</button>
+          )}
+        </div>
+        {e.descripcion && <p style={{ fontSize: 13, color: 'var(--text2)', lineHeight: 1.6 }}>{e.descripcion}</p>}
+      </div>
+    </div>
+  );
+
+  return (
+    <>
+      <div className="ph">
+        <h2>🗓️ Eventos</h2>
+        <p>Actividades programadas y pasadas del fondo</p>
+      </div>
+
+      <div style={{ marginBottom: 16 }}>
+        <button className="btn primary" onClick={() => setShowForm(v => !v)}>
+          {showForm ? 'Cancelar' : '+ Publicar evento'}
+        </button>
+      </div>
+
+      {showForm && (
+        <div className="card" style={{ borderTop: '3px solid var(--purple)' }}>
+          <div className="ct">Nuevo Evento</div>
+          <div className="fg" style={{ marginTop: 14 }}>
+            <div className="field ff"><label>Titulo del evento</label><input value={form.titulo} onChange={e => setForm({ ...form, titulo: e.target.value })} placeholder="Tarde de integracion, Bingo solidario..." /></div>
+            <div className="field"><label>Fecha del evento</label><input type="date" value={form.fecha_evento} onChange={e => setForm({ ...form, fecha_evento: e.target.value })} /></div>
+            <div className="field"><label>Lugar</label><input value={form.lugar} onChange={e => setForm({ ...form, lugar: e.target.value })} placeholder="Parque El Tunal, Casa comunal..." /></div>
+            <div className="field ff">
+              <label>Descripcion</label>
+              <textarea value={form.descripcion} onChange={e => setForm({ ...form, descripcion: e.target.value })}
+                placeholder="Detalles del evento, como participar, que llevar..."
+                style={{ minHeight: 80, resize: 'vertical', width: '100%', padding: '11px 14px', background: 'var(--surface2)', border: '1.5px solid var(--border)', borderRadius: 'var(--rs)', color: 'var(--text)', fontSize: 14, outline: 'none' }} />
+            </div>
+            <div className="field ff">
+              <label>Foto (opcional)</label>
+              <div className="uz" onClick={() => fileRef.current.click()} style={{ padding: 16 }}>
+                <div className="ui">{preview ? '✅' : '📷'}</div>
+                <p>{preview ? <strong style={{ color: 'var(--green2)' }}>Imagen lista</strong> : <><strong>Toca</strong> para agregar foto</>}</p>
+                <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={e => handleFile(e.target.files[0])} />
+              </div>
+              {preview && <img src={preview} className="prev" alt="preview" />}
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 10, marginTop: 14 }}>
+            <button className="btn primary" onClick={publicar} disabled={saving}>{saving ? 'Publicando...' : 'Publicar evento'}</button>
+            <button className="btn ghost" onClick={() => { setShowForm(false); setFile(null); setPreview(null); }}>Cancelar</button>
+          </div>
+        </div>
+      )}
+
+      {proximos.length > 0 && (
+        <>
+          <h3 style={{ fontFamily: "'Playfair Display',serif", fontSize: 16, marginBottom: 12, color: 'var(--accent2)' }}>📌 Proximos eventos</h3>
+          {proximos.map(e => <CardEvento key={e.id} e={e} />)}
+        </>
+      )}
+
+      {pasados.length > 0 && (
+        <>
+          <h3 style={{ fontFamily: "'Playfair Display',serif", fontSize: 16, margin: '24px 0 12px', color: 'var(--text2)' }}>📁 Eventos pasados</h3>
+          {pasados.map(e => <CardEvento key={e.id} e={e} />)}
+        </>
+      )}
+
+      {!activos.length && (
+        <div className="card"><div className="empty"><div className="ei">🗓️</div>No hay eventos publicados aun. Crea el primero!</div></div>
       )}
     </>
   );
