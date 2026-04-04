@@ -130,6 +130,14 @@ const api = {
     if (error) throw new Error(error.message);
     const { data } = supabase.storage.from('comprobantes').getPublicUrl(path);
     return data.publicUrl;
+  }, 
+   async uploadMedia(file, userId) {
+    const ext = file.name.split('.').pop();
+    const path = `${userId}/${Date.now()}.${ext}`;
+    const { error } = await supabase.storage.from('media').upload(path, file, { contentType: file.type });
+    if (error) throw new Error(error.message);
+    const { data } = supabase.storage.from('media').getPublicUrl(path);
+    return data.publicUrl;
   },
   async getPrestamos(filter = {}) {
     let q = supabase.from('prestamos').select('*, miembros(nombre,cedula)').order('created_at', { ascending: false });
