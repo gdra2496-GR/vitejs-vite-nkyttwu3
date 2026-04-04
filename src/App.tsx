@@ -131,6 +131,14 @@ const api = {
     const { data } = supabase.storage.from('comprobantes').getPublicUrl(path);
     return data.publicUrl;
   },
+  async uploadMedia(file, userId) {
+    const ext = file.name.split('.').pop();
+    const path = `${userId}/${Date.now()}.${ext}`;
+    const { error } = await supabase.storage.from('media').upload(path, file, { contentType: file.type });
+    if (error) throw new Error(error.message);
+    const { data } = supabase.storage.from('media').getPublicUrl(path);
+    return data.publicUrl;
+  },
   async getPrestamos(filter = {}) {
     let q = supabase.from('prestamos').select('*, miembros(nombre,cedula)').order('created_at', { ascending: false });
     if (filter.miembro_id) q = q.eq('miembro_id', filter.miembro_id);
@@ -2225,9 +2233,7 @@ function Noticias({ user, showToast, setLight }) {
     try {
       let foto_url = null;
       if (file) {
-        foto_url = await api.uploadComprobante(file, user.id);
-      }
-      await api.createNoticia({ titulo: form.titulo, contenido: form.contenido, foto_url, autor_id: user.id, activo: true });
+        foto_url = await api.uploadMedia(file, user.id);      await api.createNoticia({ titulo: form.titulo, contenido: form.contenido, foto_url, autor_id: user.id, activo: true });
       setShowForm(false);
       setForm({ titulo: '', contenido: '' });
       setFile(null);
@@ -2349,8 +2355,7 @@ function Eventos({ user, showToast, setLight }) {
     setSaving(true);
     try {
       let foto_url = null;
-      if (file) foto_url = await api.uploadComprobante(file, user.id);
-      await api.createEvento({ ...form, foto_url, autor_id: user.id, activo: true });
+      foto_url = await api.uploadMedia(file, user.id);      await api.createEvento({ ...form, foto_url, autor_id: user.id, activo: true });
       setShowForm(false);
       setForm({ titulo: '', descripcion: '', fecha_evento: '', lugar: '' });
       setFile(null);
