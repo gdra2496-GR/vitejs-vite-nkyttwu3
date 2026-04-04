@@ -2366,14 +2366,16 @@ function Eventos({ user, showToast, setLight }) {
       showToast('Evento publicado.');
       refetch();
     } catch (e) { showToast(e.message, 'err'); } finally { setSaving(false); }
-  };    if (!window.confirm('Eliminar este evento?')) return;
+  };
+
+  const eliminar = async (e) => {
+    if (!window.confirm('Eliminar este evento?')) return;
     try {
       await api.updateEvento(e.id, { activo: false });
       showToast('Evento eliminado.');
       refetch();
     } catch (e) { showToast(e.message, 'err'); }
   };
-
   const hoy = today();
   const activos = (eventos || []).filter(e => e.activo);
   const proximos = activos.filter(e => e.fecha_evento >= hoy);
