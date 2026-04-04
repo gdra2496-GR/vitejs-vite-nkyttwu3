@@ -2233,7 +2233,9 @@ function Noticias({ user, showToast, setLight }) {
     try {
       let foto_url = null;
       if (file) {
-        foto_url = await api.uploadMedia(file, user.id);      await api.createNoticia({ titulo: form.titulo, contenido: form.contenido, foto_url, autor_id: user.id, activo: true });
+        foto_url = await api.uploadMedia(file, user.id);
+      }
+      await api.createNoticia({ titulo: form.titulo, contenido: form.contenido, foto_url, autor_id: user.id, activo: true });
       setShowForm(false);
       setForm({ titulo: '', contenido: '' });
       setFile(null);
@@ -2241,9 +2243,7 @@ function Noticias({ user, showToast, setLight }) {
       showToast('Noticia publicada.');
       refetch();
     } catch (e) { showToast(e.message, 'err'); } finally { setSaving(false); }
-  };
-
-  const eliminar = async (n) => {
+  };  const eliminar = async (n) => {
     if (!window.confirm('Eliminar esta noticia?')) return;
     try {
       await api.updateNoticia(n.id, { activo: false });
@@ -2355,7 +2355,10 @@ function Eventos({ user, showToast, setLight }) {
     setSaving(true);
     try {
       let foto_url = null;
-      foto_url = await api.uploadMedia(file, user.id);      await api.createEvento({ ...form, foto_url, autor_id: user.id, activo: true });
+      if (file) {
+        foto_url = await api.uploadMedia(file, user.id);
+      }
+      await api.createEvento({ ...form, foto_url, autor_id: user.id, activo: true });
       setShowForm(false);
       setForm({ titulo: '', descripcion: '', fecha_evento: '', lugar: '' });
       setFile(null);
@@ -2363,10 +2366,7 @@ function Eventos({ user, showToast, setLight }) {
       showToast('Evento publicado.');
       refetch();
     } catch (e) { showToast(e.message, 'err'); } finally { setSaving(false); }
-  };
-
-  const eliminar = async (e) => {
-    if (!window.confirm('Eliminar este evento?')) return;
+  };    if (!window.confirm('Eliminar este evento?')) return;
     try {
       await api.updateEvento(e.id, { activo: false });
       showToast('Evento eliminado.');
