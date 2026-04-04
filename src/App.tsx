@@ -131,14 +131,6 @@ const api = {
     const { data } = supabase.storage.from('comprobantes').getPublicUrl(path);
     return data.publicUrl;
   },
-  async uploadMedia(file, userId) {
-    const ext = file.name.split('.').pop();
-    const path = `${userId}/${Date.now()}.${ext}`;
-    const { error } = await supabase.storage.from('media').upload(path, file, { contentType: file.type });
-    if (error) throw new Error(error.message);
-    const { data } = supabase.storage.from('media').getPublicUrl(path);
-    return data.publicUrl;
-  },
   async getPrestamos(filter = {}) {
     let q = supabase.from('prestamos').select('*, miembros(nombre,cedula)').order('created_at', { ascending: false });
     if (filter.miembro_id) q = q.eq('miembro_id', filter.miembro_id);
@@ -214,6 +206,20 @@ const api = {
   },
   async updateEvento(id, patch) {
     const { error } = await supabase.from('eventos').update(patch).eq('id', id);
+    if (error) throw new Error(error.message);
+  },
+
+  // MERCH
+  async getMerch() {
+    const { data } = await supabase.from('merch').select('*').order('created_at', { ascending: false });
+    return data || [];
+  },
+  async createMerch(m) {
+    const { error } = await supabase.from('merch').insert(m);
+    if (error) throw new Error(error.message);
+  },
+  async updateMerch(id, patch) {
+    const { error } = await supabase.from('merch').update(patch).eq('id', id);
     if (error) throw new Error(error.message);
   },
 
@@ -493,6 +499,7 @@ export default function App() {
     { id: 'alianzas', icon: '🤜', label: 'Alianzas' },
     { id: 'noticias', icon: '📰', label: 'Noticias' },
     { id: 'eventos', icon: '🗓️', label: 'Eventos' },
+    { id: 'merch', icon: '👕', label: 'Merch' },
     { id: 'config', icon: '⚙️', label: 'Configuración' },
   ];
   const memberNav = [
@@ -504,6 +511,7 @@ export default function App() {
     { id: 'alianzas', icon: '🤜', label: 'Alianzas' },
     { id: 'noticias', icon: '📰', label: 'Noticias' },
     { id: 'eventos', icon: '🗓️', label: 'Eventos' },
+    { id: 'merch', icon: '👕', label: 'Merch' },
   ];
   const navItems = user?.is_admin ? adminNav : memberNav;
 
@@ -574,6 +582,7 @@ export default function App() {
           {tab === 'alianzas' && <Alianzas user={user} showToast={showToast} />}
           {tab === 'noticias' && <Noticias user={user} showToast={showToast} setLight={setLight} />}
           {tab === 'eventos' && <Eventos user={user} showToast={showToast} setLight={setLight} />}
+          {tab === 'merch' && <Merch user={user} showToast={showToast} setLight={setLight} />}
           {tab === 'config' && user.is_admin && <AdminConfig config={config} setConfig={setConfig} showToast={showToast} />}
         </main>
       </div>
@@ -2233,7 +2242,7 @@ function Noticias({ user, showToast, setLight }) {
     try {
       let foto_url = null;
       if (file) {
-        foto_url = await api.uploadMedia(file, user.id);
+        foto_url = await api.uploadComprobante(file, user.id);
       }
       await api.createNoticia({ titulo: form.titulo, contenido: form.contenido, foto_url, autor_id: user.id, activo: true });
       setShowForm(false);
@@ -2243,7 +2252,9 @@ function Noticias({ user, showToast, setLight }) {
       showToast('Noticia publicada.');
       refetch();
     } catch (e) { showToast(e.message, 'err'); } finally { setSaving(false); }
-  };  const eliminar = async (n) => {
+  };
+
+  const eliminar = async (n) => {
     if (!window.confirm('Eliminar esta noticia?')) return;
     try {
       await api.updateNoticia(n.id, { activo: false });
@@ -2355,9 +2366,7 @@ function Eventos({ user, showToast, setLight }) {
     setSaving(true);
     try {
       let foto_url = null;
-      if (file) {
-        foto_url = await api.uploadMedia(file, user.id);
-      }
+      if (file) foto_url = await api.uploadComprobante(file, user.id);
       await api.createEvento({ ...form, foto_url, autor_id: user.id, activo: true });
       setShowForm(false);
       setForm({ titulo: '', descripcion: '', fecha_evento: '', lugar: '' });
@@ -2376,6 +2385,7 @@ function Eventos({ user, showToast, setLight }) {
       refetch();
     } catch (e) { showToast(e.message, 'err'); }
   };
+
   const hoy = today();
   const activos = (eventos || []).filter(e => e.activo);
   const proximos = activos.filter(e => e.fecha_evento >= hoy);
@@ -2463,6 +2473,197 @@ function Eventos({ user, showToast, setLight }) {
 
       {!activos.length && (
         <div className="card"><div className="empty"><div className="ei">🗓️</div>No hay eventos publicados aun. Crea el primero!</div></div>
+      )}
+    </>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────
+   MERCH
+───────────────────────────────────────────────────────────── */
+function Merch({ user, showToast, setLight }) {
+  const { data: productos, refetch } = useQuery(() => api.getMerch(), []);
+  const [showForm, setShowForm] = useState(false);
+  const [editId, setEditId] = useState(null);
+  const [form, setForm] = useState({ nombre: '', descripcion: '', precio: '', tallas: '', colores: '', stock: '0' });
+  const [file, setFile] = useState(null);
+  const [preview, setPreview] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const fileRef = useRef();
+
+  const WHATSAPP_ADMIN = '573102936563'; // Cambia por el numero del admin
+
+  const disponibles = (productos || []).filter(p => p.disponible);
+
+  const handleFile = (f) => {
+    if (!f || !f.type.startsWith('image/')) return;
+    setFile(f);
+    const r = new FileReader();
+    r.onload = (e) => setPreview(e.target.result);
+    r.readAsDataURL(f);
+  };
+
+  const crear = async () => {
+    if (!form.nombre || !form.precio) { showToast('Nombre y precio son obligatorios.', 'err'); return; }
+    setSaving(true);
+    try {
+      let foto_url = null;
+      if (file) foto_url = await api.uploadMedia(file, user.id);
+      await api.createMerch({
+        nombre: form.nombre,
+        descripcion: form.descripcion,
+        precio: parseInt(form.precio),
+        tallas: form.tallas,
+        colores: form.colores,
+        stock: parseInt(form.stock) || 0,
+        foto_url,
+        disponible: true,
+      });
+      setShowForm(false);
+      setForm({ nombre: '', descripcion: '', precio: '', tallas: '', colores: '', stock: '0' });
+      setFile(null);
+      setPreview(null);
+      showToast('Producto agregado.');
+      refetch();
+    } catch (e) { showToast(e.message, 'err'); } finally { setSaving(false); }
+  };
+
+  const abrirEditar = (p) => {
+    setEditId(p.id);
+    setForm({ nombre: p.nombre, descripcion: p.descripcion || '', precio: String(p.precio), tallas: p.tallas || '', colores: p.colores || '', stock: String(p.stock || 0) });
+    setPreview(p.foto_url || null);
+    setShowForm(true);
+  };
+
+  const guardarEdicion = async () => {
+    setSaving(true);
+    try {
+      let foto_url = preview && !file ? preview : null;
+      if (file) foto_url = await api.uploadMedia(file, user.id);
+      await api.updateMerch(editId, {
+        nombre: form.nombre,
+        descripcion: form.descripcion,
+        precio: parseInt(form.precio),
+        tallas: form.tallas,
+        colores: form.colores,
+        stock: parseInt(form.stock) || 0,
+        ...(foto_url && { foto_url }),
+      });
+      setShowForm(false);
+      setEditId(null);
+      setForm({ nombre: '', descripcion: '', precio: '', tallas: '', colores: '', stock: '0' });
+      setFile(null);
+      setPreview(null);
+      showToast('Producto actualizado.');
+      refetch();
+    } catch (e) { showToast(e.message, 'err'); } finally { setSaving(false); }
+  };
+
+  const toggleDisponible = async (p) => {
+    try {
+      await api.updateMerch(p.id, { disponible: !p.disponible });
+      showToast(`Producto ${!p.disponible ? 'activado' : 'desactivado'}.`);
+      refetch();
+    } catch (e) { showToast(e.message, 'err'); }
+  };
+
+  const cancelar = () => {
+    setShowForm(false);
+    setEditId(null);
+    setForm({ nombre: '', descripcion: '', precio: '', tallas: '', colores: '', stock: '0' });
+    setFile(null);
+    setPreview(null);
+  };
+
+  const pedirPorWhatsApp = (p) => {
+    const msg = encodeURIComponent(`Hola! Soy ${user.nombre}, socio del Fondo CashDave.\nQuiero pedir: *${p.nombre}*\nPrecio: ${COP(p.precio)}\n${p.tallas ? 'Tallas disponibles: ' + p.tallas : ''}\n${p.colores ? 'Colores: ' + p.colores : ''}\n\nPor favor confirma disponibilidad y datos de pago. Gracias!`);
+    window.open(`https://wa.me/${WHATSAPP_ADMIN}?text=${msg}`, '_blank');
+  };
+
+  return (
+    <>
+      <div className="ph">
+        <h2>👕 Merch CashDave</h2>
+        <p>Productos exclusivos para socios del fondo</p>
+      </div>
+
+      {user.is_admin && (
+        <div style={{ marginBottom: 16 }}>
+          <button className="btn primary" onClick={() => { cancelar(); setShowForm(v => !v); }}>
+            {showForm && !editId ? 'Cancelar' : '+ Agregar producto'}
+          </button>
+        </div>
+      )}
+
+      {showForm && user.is_admin && (
+        <div className="card" style={{ borderTop: '3px solid var(--purple)' }}>
+          <div className="ct">{editId ? 'Editar Producto' : 'Nuevo Producto'}</div>
+          <div className="fg" style={{ marginTop: 14 }}>
+            <div className="field ff"><label>Nombre del producto</label><input value={form.nombre} onChange={e => setForm({ ...form, nombre: e.target.value })} placeholder="Camiseta CashDave, Gorra del fondo..." /></div>
+            <div className="field"><label>Precio (COP)</label><input type="number" value={form.precio} onChange={e => setForm({ ...form, precio: e.target.value })} placeholder="50000" /></div>
+            <div className="field"><label>Stock disponible</label><input type="number" value={form.stock} onChange={e => setForm({ ...form, stock: e.target.value })} placeholder="10" /></div>
+            <div className="field"><label>Tallas</label><input value={form.tallas} onChange={e => setForm({ ...form, tallas: e.target.value })} placeholder="S, M, L, XL" /></div>
+            <div className="field"><label>Colores</label><input value={form.colores} onChange={e => setForm({ ...form, colores: e.target.value })} placeholder="Negro, Blanco, Azul..." /></div>
+            <div className="field ff"><label>Descripcion</label><input value={form.descripcion} onChange={e => setForm({ ...form, descripcion: e.target.value })} placeholder="Camiseta 100% algodon con logo bordado..." /></div>
+            <div className="field ff">
+              <label>Foto del producto</label>
+              <div className="uz" onClick={() => fileRef.current.click()} style={{ padding: 16 }}>
+                <div className="ui">{preview ? '✅' : '📷'}</div>
+                <p>{preview ? <strong style={{ color: 'var(--green2)' }}>Imagen lista — toca para cambiar</strong> : <><strong>Toca</strong> para agregar foto</>}</p>
+                <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={e => handleFile(e.target.files[0])} />
+              </div>
+              {preview && <img src={preview} className="prev" alt="preview" />}
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 10, marginTop: 14 }}>
+            <button className="btn primary" onClick={editId ? guardarEdicion : crear} disabled={saving}>{saving ? 'Guardando...' : editId ? 'Guardar cambios' : 'Agregar producto'}</button>
+            <button className="btn ghost" onClick={cancelar}>Cancelar</button>
+          </div>
+        </div>
+      )}
+
+      {!disponibles.length && !user.is_admin ? (
+        <div className="card"><div className="empty"><div className="ei">👕</div>Pronto tendreemos merch exclusivo disponible!</div></div>
+      ) : (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 16 }}>
+          {(productos || []).map(p => (
+            <div key={p.id} className="card" style={{ padding: 0, overflow: 'hidden', opacity: p.disponible ? 1 : 0.5 }}>
+              {p.foto_url ? (
+                <img src={p.foto_url} alt={p.nombre}
+                  style={{ width: '100%', height: 200, objectFit: 'cover', cursor: 'zoom-in' }}
+                  onClick={() => setLight(p.foto_url)} />
+              ) : (
+                <div style={{ width: '100%', height: 200, background: 'linear-gradient(135deg, var(--surface2), var(--border))', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 48 }}>👕</div>
+              )}
+              <div style={{ padding: 16 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: 15 }}>{p.nombre}</div>
+                    {!p.disponible && <span className="badge br" style={{ marginTop: 4, fontSize: 10 }}>Sin stock</span>}
+                  </div>
+                  <div style={{ fontFamily: "'Playfair Display',serif", fontSize: 18, fontWeight: 700, color: 'var(--gold2)' }}>{COP(p.precio)}</div>
+                </div>
+                {p.descripcion && <p style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 10, lineHeight: 1.5 }}>{p.descripcion}</p>}
+                <div style={{ display: 'flex', gap: 12, marginBottom: 12, flexWrap: 'wrap' }}>
+                  {p.tallas && <div style={{ fontSize: 11, color: 'var(--text3)' }}>📐 {p.tallas}</div>}
+                  {p.colores && <div style={{ fontSize: 11, color: 'var(--text3)' }}>🎨 {p.colores}</div>}
+                  {p.stock > 0 && <div style={{ fontSize: 11, color: 'var(--text3)' }}>📦 {p.stock} disponibles</div>}
+                </div>
+                {p.disponible && (
+                  <button className="btn primary" style={{ width: '100%' }} onClick={() => pedirPorWhatsApp(p)}>
+                    💬 Pedir por WhatsApp
+                  </button>
+                )}
+                {user.is_admin && (
+                  <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+                    <button className="btn sm ghost" onClick={() => abrirEditar(p)}>✏️ Editar</button>
+                    <button className={`btn sm ${p.disponible ? 'danger' : 'success'}`} onClick={() => toggleDisponible(p)}>{p.disponible ? 'Desactivar' : 'Activar'}</button>
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
       )}
     </>
   );
