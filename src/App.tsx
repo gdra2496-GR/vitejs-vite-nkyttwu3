@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 const SUPABASE_URL = 'https://dikrihjhzoqyayibynmb.supabase.co';
@@ -172,6 +172,14 @@ const api = {
   },
   async createGanancia(g) {
     const { error } = await supabase.from('ganancias').insert(g);
+    if (error) throw new Error(error.message);
+  },
+  async updateGanancia(id, patch) {
+    const { error } = await supabase.from('ganancias').update(patch).eq('id', id);
+    if (error) throw new Error(error.message);
+  },
+  async deleteGanancia(id) {
+    const { error } = await supabase.from('ganancias').delete().eq('id', id);
     if (error) throw new Error(error.message);
   },
 
@@ -1291,6 +1299,7 @@ function AdminPrestamos({ config, showToast }) {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ cedula: '', monto: '', cuotas: '6', interes: String(config.tasa_prestamo), motivo: '' });
   const [saving, setSaving] = useState(false);
+  const [loadingId, setLoadingId] = useState(null);
 
   const crear = async () => {
     const m = await api.getMiembroByCedula(form.cedula.trim());
@@ -1316,10 +1325,11 @@ function AdminPrestamos({ config, showToast }) {
   };
 
   const pagarCuota = async (p) => {
-    if (p.cuotas_pagadas >= p.cuotas) return;
+    if (p.cuotas_pagadas >= p.cuotas || loadingId) return;
     const nuevas = p.cuotas_pagadas + 1;
     const estado = nuevas === p.cuotas ? 'pagado' : 'activo';
     const interesMes = Math.round(FROM_DB(p.monto) * (p.interes / 100));
+    setLoadingId(p.id);
     try {
       await api.updatePrestamo(p.id, { cuotas_pagadas: nuevas, estado });
       await api.createGanancia({
@@ -1331,6 +1341,36 @@ function AdminPrestamos({ config, showToast }) {
       showToast(`Cuota ${nuevas}/${p.cuotas} registrada.`);
       refetch();
     } catch (e) { showToast(e.message, 'err'); }
+    finally { setLoadingId(null); }
+  };
+
+  const saldarPrestamo = async (p) => {
+    if (loadingId) return;
+    const cuotasRestantes = p.cuotas - p.cuotas_pagadas;
+    if (cuotasRestantes <= 0) return;
+    const interesMes = Math.round(FROM_DB(p.monto) * (p.interes / 100));
+    const totalInteresRestante = interesMes * cuotasRestantes;
+    const cuotaVal = Math.round((FROM_DB(p.monto) * (1 + (p.interes / 100) * p.cuotas)) / p.cuotas);
+    const totalPago = cuotaVal * cuotasRestantes;
+    if (!window.confirm(
+      `Registrar pago anticipado de ${p.miembros?.nombre}?\n` +
+      `• Cuotas restantes: ${cuotasRestantes}\n` +
+      `• Total a recibir: ${COP(totalPago)}\n` +
+      `• Interés a registrar: ${COP(totalInteresRestante)}`
+    )) return;
+    setLoadingId(p.id);
+    try {
+      await api.updatePrestamo(p.id, { cuotas_pagadas: p.cuotas, estado: 'pagado' });
+      await api.createGanancia({
+        descripcion: `Pago anticipado (${cuotasRestantes} cuotas) — ${p.miembros?.nombre}`,
+        monto: totalInteresRestante,
+        tipo: 'interes',
+        fecha: today(),
+      });
+      showToast('✅ Préstamo saldado anticipadamente.');
+      refetch();
+    } catch (e) { showToast(e.message, 'err'); }
+    finally { setLoadingId(null); }
   };
 
   return (
@@ -1371,6 +1411,8 @@ function AdminPrestamos({ config, showToast }) {
                 prestamos.map((p) => {
                   const cv = Math.round((FROM_DB(p.monto) * (1 + (p.interes / 100) * p.cuotas)) / p.cuotas);
                   const pct = Math.round((p.cuotas_pagadas / p.cuotas) * 100);
+                  const isLoading = loadingId === p.id;
+                  const cuotasRestantes = p.cuotas - p.cuotas_pagadas;
                   return (
                     <tr key={p.id}>
                       <td><div style={{ fontWeight: 600 }}>{p.miembros?.nombre}</div><div style={{ fontSize: 11, color: 'var(--text3)' }}>{p.motivo}</div></td>
@@ -1383,7 +1425,20 @@ function AdminPrestamos({ config, showToast }) {
                         <div className="pb"><div className="pf" style={{ width: `${pct}%` }} /></div>
                       </td>
                       <td><span className={`badge ${p.estado === 'activo' ? 'bgo' : p.estado === 'pagado' ? 'bg' : 'bgy'}`}>{p.estado}</span></td>
-                      <td>{p.estado === 'activo' && <button className="btn sm success" onClick={() => pagarCuota(p)}>+ Cuota</button>}</td>
+                      <td>
+                        {p.estado === 'activo' && (
+                          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                            <button className="btn sm success" onClick={() => pagarCuota(p)} disabled={isLoading || !!loadingId}>
+                              {isLoading ? '…' : '+ Cuota'}
+                            </button>
+                            {cuotasRestantes > 1 && (
+                              <button className="btn sm gold" onClick={() => saldarPrestamo(p)} disabled={isLoading || !!loadingId} title={`Saldar ${cuotasRestantes} cuotas restantes`}>
+                                ⚡ Saldar
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </td>
                     </tr>
                   );
                 })
@@ -1558,6 +1613,8 @@ function Ganancias({ user, showToast }) {
   const [showForm, setShowForm] = useState(false);
   const [abonoId, setAbonoId] = useState(null);
   const [abonoMonto, setAbonoMonto] = useState('');
+  const [editId, setEditId] = useState(null);
+  const [editForm, setEditForm] = useState({ descripcion: '', monto: '', tipo: 'rendimiento' });
   const [form, setForm] = useState({ descripcion: '', monto: '', tipo: 'rendimiento' });
   const [saving, setSaving] = useState(false);
 
@@ -1590,6 +1647,7 @@ function Ganancias({ user, showToast }) {
   const registrarAbono = async (g) => {
     const monto = parseInt(abonoMonto);
     if (!monto || monto <= 0) { showToast('Ingresa un monto valido.', 'err'); return; }
+    if (saving) return;
     setSaving(true);
     try {
       await api.createGanancia({ descripcion: g.descripcion + ' — Abono', monto, tipo: g.tipo, fecha: today() });
@@ -1598,6 +1656,37 @@ function Ganancias({ user, showToast }) {
       showToast('Abono registrado.');
       refetch();
     } catch (e) { showToast(e.message, 'err'); } finally { setSaving(false); }
+  };
+
+  const abrirEditar = (g) => {
+    setEditId(g.id);
+    setEditForm({ descripcion: g.descripcion, monto: String(FROM_DB(g.monto)), tipo: g.tipo });
+    setAbonoId(null);
+  };
+
+  const guardarEdicion = async () => {
+    if (!editForm.descripcion || !editForm.monto) { showToast('Completa todos los campos.', 'err'); return; }
+    if (saving) return;
+    setSaving(true);
+    try {
+      await api.updateGanancia(editId, {
+        descripcion: editForm.descripcion,
+        monto: parseInt(editForm.monto),
+        tipo: editForm.tipo,
+      });
+      setEditId(null);
+      showToast('Ganancia actualizada.');
+      refetch();
+    } catch (e) { showToast(e.message, 'err'); } finally { setSaving(false); }
+  };
+
+  const eliminarGanancia = async (g) => {
+    if (!window.confirm(`¿Eliminar "${g.descripcion}"?\nEsto no puede deshacerse.`)) return;
+    try {
+      await api.deleteGanancia(g.id);
+      showToast('Registro eliminado.');
+      refetch();
+    } catch (e) { showToast(e.message, 'err'); }
   };
 
   return (
@@ -1658,18 +1747,50 @@ function Ganancias({ user, showToast }) {
               ) : (
                 ganancias.map((g) => (
                   <React.Fragment key={g.id}>
-                    <tr>
-                      <td style={{ fontWeight: 500 }}>{g.descripcion}</td>
-                      <td><span className={`badge ${g.tipo === 'rendimiento' ? 'bg' : g.tipo === 'interes' ? 'bb' : 'bp'}`}>{g.tipo}</span></td>
-                      <td style={{ fontWeight: 700, color: 'var(--green2)' }}>{COP(FROM_DB(g.monto))}</td>
-                      <td style={{ fontSize: 12 }}>{g.fecha}</td>
-                      {user.is_admin && (
+                    {editId === g.id && user.is_admin ? (
+                      <tr style={{ background: 'var(--surface2)' }}>
                         <td>
-                          <button className="btn sm gold" onClick={() => { setAbonoId(abonoId === g.id ? null : g.id); setAbonoMonto(''); }}>+ Abono</button>
+                          <input value={editForm.descripcion} onChange={(e) => setEditForm({ ...editForm, descripcion: e.target.value })}
+                            style={{ width: '100%', padding: '6px 10px', background: 'var(--bg)', border: '1.5px solid var(--accent)', borderRadius: 'var(--rs)', color: 'var(--text)', fontSize: 13 }} />
                         </td>
-                      )}
-                    </tr>
-                    {abonoId === g.id && user.is_admin && (
+                        <td>
+                          <select value={editForm.tipo} onChange={(e) => setEditForm({ ...editForm, tipo: e.target.value })}
+                            style={{ padding: '6px 8px', background: 'var(--bg)', border: '1.5px solid var(--accent)', borderRadius: 'var(--rs)', color: 'var(--text)', fontSize: 12 }}>
+                            <option value="rendimiento">rendimiento</option>
+                            <option value="interes">interes</option>
+                            <option value="otro">otro</option>
+                          </select>
+                        </td>
+                        <td>
+                          <input type="number" value={editForm.monto} onChange={(e) => setEditForm({ ...editForm, monto: e.target.value })}
+                            style={{ width: 110, padding: '6px 10px', background: 'var(--bg)', border: '1.5px solid var(--accent)', borderRadius: 'var(--rs)', color: 'var(--text)', fontSize: 13 }} />
+                        </td>
+                        <td style={{ fontSize: 12, color: 'var(--text3)' }}>{g.fecha}</td>
+                        <td>
+                          <div style={{ display: 'flex', gap: 6 }}>
+                            <button className="btn sm success" onClick={guardarEdicion} disabled={saving}>{saving ? '…' : '✓'}</button>
+                            <button className="btn sm ghost" onClick={() => setEditId(null)}>✕</button>
+                          </div>
+                        </td>
+                      </tr>
+                    ) : (
+                      <tr>
+                        <td style={{ fontWeight: 500 }}>{g.descripcion}</td>
+                        <td><span className={`badge ${g.tipo === 'rendimiento' ? 'bg' : g.tipo === 'interes' ? 'bb' : 'bp'}`}>{g.tipo}</span></td>
+                        <td style={{ fontWeight: 700, color: 'var(--green2)' }}>{COP(FROM_DB(g.monto))}</td>
+                        <td style={{ fontSize: 12 }}>{g.fecha}</td>
+                        {user.is_admin && (
+                          <td>
+                            <div style={{ display: 'flex', gap: 5 }}>
+                              <button className="btn sm gold" onClick={() => { setAbonoId(abonoId === g.id ? null : g.id); setAbonoMonto(''); setEditId(null); }}>+ Abono</button>
+                              <button className="btn sm ghost" onClick={() => abrirEditar(g)} title="Editar">✏️</button>
+                              <button className="btn sm danger" onClick={() => eliminarGanancia(g)} title="Eliminar">🗑</button>
+                            </div>
+                          </td>
+                        )}
+                      </tr>
+                    )}
+                    {abonoId === g.id && user.is_admin && editId !== g.id && (
                       <tr>
                         <td colSpan={5}>
                           <div style={{ display: 'flex', gap: 10, alignItems: 'center', padding: '8px 0', flexWrap: 'wrap' }}>
@@ -2363,26 +2484,31 @@ function Eventos({ user, showToast, setLight }) {
 
   const handleFile = (f) => {
     if (!f || !f.type.startsWith('image/')) return;
+    if (preview && preview.startsWith('blob:')) URL.revokeObjectURL(preview);
     setFile(f);
-    const r = new FileReader();
-    r.onload = (e) => setPreview(e.target.result);
-    r.readAsDataURL(f);
+    setPreview(URL.createObjectURL(f));
+  };
+
+  const limpiarForm = () => {
+    if (preview && preview.startsWith('blob:')) URL.revokeObjectURL(preview);
+    setShowForm(false);
+    setForm({ titulo: '', descripcion: '', fecha_evento: '', lugar: '' });
+    setFile(null);
+    setPreview(null);
   };
 
   const publicar = async () => {
     if (!form.titulo || !form.fecha_evento) { showToast('Titulo y fecha son obligatorios.', 'err'); return; }
+    if (saving) return;
     setSaving(true);
     try {
       let foto_url = null;
-      if (file) foto_url = await api.uploadComprobante(file, user.id);
+      if (file) foto_url = await api.uploadMedia(file, user.id);
       await api.createEvento({ ...form, foto_url, autor_id: user.id, activo: true });
-      setShowForm(false);
-      setForm({ titulo: '', descripcion: '', fecha_evento: '', lugar: '' });
-      setFile(null);
-      setPreview(null);
+      limpiarForm();
       showToast('Evento publicado.');
       refetch();
-    } catch (e) { showToast(e.message, 'err'); } finally { setSaving(false); }
+    } catch (e) { showToast('Error al publicar: ' + (e.message || 'Intenta de nuevo'), 'err'); } finally { setSaving(false); }
   };
 
   const eliminar = async (e) => {
@@ -2430,7 +2556,7 @@ function Eventos({ user, showToast, setLight }) {
       </div>
 
       <div style={{ marginBottom: 16 }}>
-        <button className="btn primary" onClick={() => setShowForm(v => !v)}>
+        <button className="btn primary" onClick={() => showForm ? limpiarForm() : setShowForm(true)}>
           {showForm ? 'Cancelar' : '+ Publicar evento'}
         </button>
       </div>
@@ -2460,7 +2586,7 @@ function Eventos({ user, showToast, setLight }) {
           </div>
           <div style={{ display: 'flex', gap: 10, marginTop: 14 }}>
             <button className="btn primary" onClick={publicar} disabled={saving}>{saving ? 'Publicando...' : 'Publicar evento'}</button>
-            <button className="btn ghost" onClick={() => { setShowForm(false); setFile(null); setPreview(null); }}>Cancelar</button>
+            <button className="btn ghost" onClick={limpiarForm}>Cancelar</button>
           </div>
         </div>
       )}
