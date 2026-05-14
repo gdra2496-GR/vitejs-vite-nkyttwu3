@@ -1,4 +1,4 @@
- import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 const SUPABASE_URL = 'https://dikrihjhzoqyayibynmb.supabase.co';
@@ -39,11 +39,11 @@ const MESES_FONDO = [
 ];
 
 // Abreviaturas para el calendario
-const MESES_ABR = ['Dic','Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov'];
+const MESES_ABR = ['Dic', 'Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov'];
 
 // Mes actual como string "Marzo 2026"
 const mesActual = () => {
-  const nombres = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+  const nombres = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
   const d = new Date();
   return `${nombres[d.getMonth()]} ${d.getFullYear()}`;
 };
@@ -55,6 +55,69 @@ const initials = (n) =>
   (n || '?').split(' ').slice(0, 2).map((w) => w[0]).join('').toUpperCase();
 
 const today = () => new Date().toISOString().split('T')[0];
+
+// ─── Utilidades de imagen (anti-blank-screen en mobile) ───
+const MAX_IMAGE_MB = 15;
+const isImageFile = (f) => {
+  if (!f) return false;
+  if (f.type && f.type.startsWith('image/')) return true;
+  // Algunos browsers Android/iPhone no setean type bien; fallback por extension
+  return /\.(jpe?g|png|webp|heic|heif|gif|bmp)$/i.test(f.name || '');
+};
+const validateImage = (f) => {
+  if (!f) return 'No se selecciono ningun archivo.';
+  if (!isImageFile(f)) return 'Selecciona una imagen valida (JPG, PNG, WEBP o HEIC).';
+  if (f.size > MAX_IMAGE_MB * 1024 * 1024) {
+    const mb = (f.size / 1024 / 1024).toFixed(1);
+    return `La imagen pesa ${mb} MB. Maximo permitido: ${MAX_IMAGE_MB} MB. Reduce el tamaño desde tu galeria.`;
+  }
+  return null;
+};
+const revokeIfBlob = (url) => {
+  if (url && typeof url === 'string' && url.startsWith('blob:')) {
+    try { URL.revokeObjectURL(url); } catch (_) { /* noop */ }
+  }
+};
+
+/* ─────────────────────────────────────────────────────────────
+   ERROR BOUNDARY — Evita pantallas en blanco por errores no atrapados
+───────────────────────────────────────────────────────────── */
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+  componentDidCatch(error, info) {
+    console.error('[ErrorBoundary]', error, info);
+  }
+  reset = () => this.setState({ hasError: false, error: null });
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{ padding: 24, minHeight: '60vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ maxWidth: 460, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 14, padding: 28, textAlign: 'center' }}>
+            <div style={{ fontSize: 42, marginBottom: 12 }}>⚠️</div>
+            <h3 style={{ fontFamily: "'Playfair Display',serif", fontSize: 20, marginBottom: 8 }}>Algo salio mal</h3>
+            <p style={{ color: 'var(--text2)', fontSize: 14, marginBottom: 16, lineHeight: 1.5 }}>
+              La aplicacion encontro un error. Esto puede ocurrir si la imagen es muy grande o tu conexion fallo.
+            </p>
+            {this.state.error?.message && (
+              <pre style={{ fontSize: 11, color: 'var(--text3)', background: 'var(--surface2)', padding: 10, borderRadius: 8, overflow: 'auto', marginBottom: 16, textAlign: 'left' }}>
+                {String(this.state.error.message).slice(0, 240)}
+              </pre>
+            )}
+            <button className="btn primary" onClick={this.reset}>Reintentar</button>
+            <button className="btn ghost" style={{ marginLeft: 8 }} onClick={() => window.location.reload()}>Recargar pagina</button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 /* ─────────────────────────────────────────────────────────────
    SUPABASE HOOKS
@@ -124,17 +187,23 @@ const api = {
     if (error) throw new Error(error.message);
   },
   async uploadComprobante(file, miembroId) {
-    const ext = file.name.split('.').pop();
+    const ext = (file.name?.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg';
     const path = `${miembroId}/${Date.now()}.${ext}`;
-    const { error } = await supabase.storage.from('comprobantes').upload(path, file);
+    const { error } = await supabase.storage.from('comprobantes').upload(path, file, {
+      contentType: file.type || 'image/jpeg',
+      upsert: false,
+    });
     if (error) throw new Error(error.message);
     const { data } = supabase.storage.from('comprobantes').getPublicUrl(path);
     return data.publicUrl;
-  }, 
-   async uploadMedia(file, userId) {
-    const ext = file.name.split('.').pop();
+  },
+  async uploadMedia(file, userId) {
+    const ext = (file.name?.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg';
     const path = `${userId}/${Date.now()}.${ext}`;
-    const { error } = await supabase.storage.from('media').upload(path, file, { contentType: file.type });
+    const { error } = await supabase.storage.from('media').upload(path, file, {
+      contentType: file.type || 'image/jpeg',
+      upsert: false,
+    });
     if (error) throw new Error(error.message);
     const { data } = supabase.storage.from('media').getPublicUrl(path);
     return data.publicUrl;
@@ -429,12 +498,13 @@ tbody tr:hover td{background:rgba(255,255,255,.02)}
 .mc.paid{background:rgba(16,185,129,.08);border-color:rgba(16,185,129,.25)}
 .mc.pend{background:rgba(245,158,11,.07);border-color:rgba(245,158,11,.25)}
 .mc.miss{background:rgba(239,68,68,.05);border-color:rgba(239,68,68,.15)}
+.mc.rech{background:rgba(239,68,68,.1);border-color:rgba(239,68,68,.3)}
 .mc.curr{border-color:var(--accent);background:rgba(59,130,246,.07)}
 .mc.fut{opacity:.3}
 .mc-n{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--text3);margin-bottom:6px}
 .mc-i{font-size:18px}
 .mc-s{font-size:10px;font-weight:700;margin-top:5px}
-.mc.paid .mc-s{color:var(--green2)}.mc.pend .mc-s{color:var(--gold2)}.mc.miss .mc-s{color:var(--red2)}.mc.curr .mc-s{color:var(--accent2)}
+.mc.paid .mc-s{color:var(--green2)}.mc.pend .mc-s{color:var(--gold2)}.mc.miss .mc-s{color:var(--red2)}.mc.rech .mc-s{color:var(--red2)}.mc.curr .mc-s{color:var(--accent2)}
 
 .al{padding:13px 16px;border-radius:var(--rs);font-size:13.5px;display:flex;gap:10px;align-items:flex-start;margin-bottom:14px}
 .al.info{background:rgba(59,130,246,.08);border:1px solid rgba(59,130,246,.2);color:var(--accent2)}
@@ -461,7 +531,7 @@ tbody tr:hover td{background:rgba(255,255,255,.02)}
 .toast{position:fixed;bottom:28px;left:50%;transform:translateX(-50%);
   background:var(--green);color:#fff;padding:13px 24px;border-radius:12px;
   font-weight:600;font-size:14px;z-index:999;box-shadow:0 8px 30px rgba(16,185,129,.4);
-  animation:fadeUp .3s;white-space:nowrap}
+  animation:fadeUp .3s;white-space:nowrap;max-width:90vw;text-align:center}
 .toast.err{background:var(--red);box-shadow:0 8px 30px rgba(239,68,68,.4)}
 
 .spin{display:flex;align-items:center;justify-content:center;padding:60px;color:var(--text3);gap:12px;font-size:14px}
@@ -555,7 +625,7 @@ export default function App() {
         <header className="topbar">
           <div className="topbar-left">
             <button className="mmb" onClick={() => setNav((v) => !v)}>☰</button>
-            <div className="tl"><img src="/logo_fondo.jpg" style={{width:"100%",height:"100%",objectFit:"cover",borderRadius:"inherit"}} /></div>
+            <div className="tl"><img src="/logo_fondo.jpg" style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "inherit" }} /></div>
             <span className="tn">{config.nombre_fondo}</span>
             {user.is_admin && <span className="badge bp">Admin</span>}
           </div>
@@ -581,25 +651,27 @@ export default function App() {
         </nav>
 
         <main className="content-area" style={{ maxWidth: 920, margin: '0 auto' }}>
-          {tab === 'home' && (user.is_admin
-            ? <AdminDash user={user} config={config} setTab={setTab} showToast={showToast} />
-            : <MemberDash user={user} config={config} />)}
-          {tab === 'aportes' && (user.is_admin
-            ? <AdminAportes config={config} showToast={showToast} setLight={setLight} />
-            : <MisAportes user={user} config={config} showToast={showToast} />)}
-          {tab === 'prestamos' && (user.is_admin
-            ? <AdminPrestamos config={config} showToast={showToast} />
-            : <MisPrestamos user={user} config={config} showToast={showToast} />)}
-          {tab === 'inversiones' && <Inversiones user={user} showToast={showToast} />}
-          {tab === 'ganancias' && <Ganancias user={user} showToast={showToast} />}
-          {tab === 'miembros' && user.is_admin && <AdminMiembros showToast={showToast} />}
-          {tab === 'retiro' && user.is_admin && <AdminRetiro showToast={showToast} />}
-          {tab === 'capital' && user.is_admin && <AdminCapitalExt showToast={showToast} />}
-          {tab === 'alianzas' && <Alianzas user={user} showToast={showToast} />}
-          {tab === 'noticias' && <Noticias user={user} showToast={showToast} setLight={setLight} />}
-          {tab === 'eventos' && <Eventos user={user} showToast={showToast} setLight={setLight} />}
-          {tab === 'merch' && <Merch user={user} showToast={showToast} setLight={setLight} />}
-          {tab === 'config' && user.is_admin && <AdminConfig config={config} setConfig={setConfig} showToast={showToast} />}
+          <ErrorBoundary key={tab}>
+            {tab === 'home' && (user.is_admin
+              ? <AdminDash user={user} config={config} setTab={setTab} showToast={showToast} />
+              : <MemberDash user={user} config={config} />)}
+            {tab === 'aportes' && (user.is_admin
+              ? <AdminAportes config={config} showToast={showToast} setLight={setLight} />
+              : <MisAportes user={user} config={config} showToast={showToast} />)}
+            {tab === 'prestamos' && (user.is_admin
+              ? <AdminPrestamos config={config} showToast={showToast} />
+              : <MisPrestamos user={user} config={config} showToast={showToast} />)}
+            {tab === 'inversiones' && <Inversiones user={user} showToast={showToast} />}
+            {tab === 'ganancias' && <Ganancias user={user} showToast={showToast} />}
+            {tab === 'miembros' && user.is_admin && <AdminMiembros showToast={showToast} />}
+            {tab === 'retiro' && user.is_admin && <AdminRetiro showToast={showToast} />}
+            {tab === 'capital' && user.is_admin && <AdminCapitalExt showToast={showToast} />}
+            {tab === 'alianzas' && <Alianzas user={user} showToast={showToast} />}
+            {tab === 'noticias' && <Noticias user={user} showToast={showToast} setLight={setLight} />}
+            {tab === 'eventos' && <Eventos user={user} showToast={showToast} setLight={setLight} />}
+            {tab === 'merch' && <Merch user={user} showToast={showToast} setLight={setLight} />}
+            {tab === 'config' && user.is_admin && <AdminConfig config={config} setConfig={setConfig} showToast={showToast} />}
+          </ErrorBoundary>
         </main>
       </div>
 
@@ -643,7 +715,7 @@ function AuthScreen({ config, onLogin, showToast }) {
     <div className="auth-wrap">
       <div className="auth-box">
         <div className="auth-brand">
-          <div className="lr"><img src="/logo_fondo.jpg" style={{width:"100%",height:"100%",objectFit:"cover",borderRadius:"inherit"}} /></div>
+          <div className="lr"><img src="/logo_fondo.jpg" style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "inherit" }} /></div>
           <h1>{config?.nombre_fondo || 'Fondo Solidario'}</h1>
           <p>Ingresa con tu número de cédula</p>
         </div>
@@ -861,7 +933,7 @@ function AdminDash({ config, setTab, showToast }) {
 }
 
 /* ─────────────────────────────────────────────────────────────
-   MIS APORTES (member)
+   MIS APORTES (member)  — ⚡ FIX: createObjectURL en vez de base64
 ───────────────────────────────────────────────────────────── */
 function MisAportes({ user, config, showToast }) {
   const { data: aportes, refetch } = useQuery(() => api.getAportes({ miembro_id: user.id }), [user.id]);
@@ -873,28 +945,68 @@ function MisAportes({ user, config, showToast }) {
   const [comp, setComp] = useState('');
   const [nota, setNota] = useState('');
   const [saving, setSaving] = useState(false);
-  const fileRef = useRef();
+  const fileRef = useRef(null);
+
+  // Limpiar el blob URL cuando se desmonta el componente
+  useEffect(() => {
+    return () => { revokeIfBlob(preview); };
+    // eslint-disable-next-line
+  }, []);
 
   const mes = mesActual();
-  const idxActual = idxMesActual(); // índice en MESES_FONDO
+  const idxActual = idxMesActual();
 
-  // Meses disponibles para subir: los que no tienen aporte aún
+  // Meses disponibles: los que no tienen aporte O que estan rechazados (re-subir)
   const mesesDisponibles = MESES_FONDO.filter(
-    (m) => !(aportes || []).some((a) => a.mes === m)
+    (m) => !(aportes || []).some((a) => a.mes === m && a.estado !== 'rechazado')
   );
 
-  const yaRegistradoMesSel = (aportes || []).some((a) => a.mes === mesSel);
+  // Asegurar que mesSel sea siempre un mes valido (no uno ya pagado)
+  useEffect(() => {
+    if (mesesDisponibles.length > 0 && !mesesDisponibles.includes(mesSel)) {
+      setMesSel(mesesDisponibles.includes(mes) ? mes : mesesDisponibles[0]);
+    }
+  }, [aportes]); // eslint-disable-line
 
+  // ⚡ HANDLER SEGURO — usa createObjectURL (no base64) y captura errores
   const handleFile = (f) => {
-    if (!f || !f.type.startsWith('image/')) return;
-    setFile(f);
-    const r = new FileReader();
-    r.onload = (e) => setPreview(e.target.result);
-    r.readAsDataURL(f);
+    try {
+      const err = validateImage(f);
+      if (err) { showToast(err, 'err'); return; }
+
+      // Liberar el preview anterior si era un blob
+      revokeIfBlob(preview);
+
+      setFile(f);
+      const url = URL.createObjectURL(f);
+      setPreview(url);
+    } catch (ex) {
+      console.error('[Aportes.handleFile]', ex);
+      showToast('No se pudo cargar la imagen. Intenta con otra foto.', 'err');
+      setFile(null);
+      setPreview(null);
+    }
+  };
+
+  const limpiarFoto = () => {
+    revokeIfBlob(preview);
+    setFile(null);
+    setPreview(null);
+    if (fileRef.current) fileRef.current.value = '';
+  };
+
+  const cerrarForm = () => {
+    revokeIfBlob(preview);
+    setShowForm(false);
+    setFile(null);
+    setPreview(null);
+    setComp('');
+    setNota('');
   };
 
   const registrar = async () => {
     if (!file) { showToast('Sube la foto del comprobante.', 'err'); return; }
+    if (saving) return;
     setSaving(true);
     try {
       const fotoUrl = await api.uploadComprobante(file, user.id);
@@ -908,15 +1020,12 @@ function MisAportes({ user, config, showToast }) {
         nota,
         estado: 'pendiente',
       });
-      setShowForm(false);
-      setFile(null);
-      setPreview(null);
-      setComp('');
-      setNota('');
+      cerrarForm();
       showToast('¡Aporte enviado! Esperando confirmación del admin.');
       refetch();
     } catch (e) {
-      showToast('Error al subir: ' + e.message, 'err');
+      console.error('[Aportes.registrar]', e);
+      showToast('Error al subir: ' + (e?.message || 'intenta de nuevo'), 'err');
     } finally {
       setSaving(false);
     }
@@ -943,7 +1052,6 @@ function MisAportes({ user, config, showToast }) {
           <div className="ct">Registrar Aporte</div>
           <div className="cs">{COP(user.monto_mensual || config.monto_mensual)} · Sube la foto de tu transferencia</div>
 
-          {/* Selector de mes */}
           <div className="field" style={{ marginTop: 16 }}>
             <label>¿A qué mes corresponde este pago?</label>
             <select value={mesSel} onChange={(e) => setMesSel(e.target.value)}>
@@ -955,20 +1063,36 @@ function MisAportes({ user, config, showToast }) {
 
           <div style={{ marginTop: 14 }}>
             <div className={`uz ${drag ? 'drag' : ''}`}
-              onClick={() => fileRef.current.click()}
+              onClick={() => { try { fileRef.current?.click(); } catch (_) { } }}
               onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
               onDragLeave={() => setDrag(false)}
-              onDrop={(e) => { e.preventDefault(); setDrag(false); handleFile(e.dataTransfer.files[0]); }}>
+              onDrop={(e) => {
+                e.preventDefault();
+                setDrag(false);
+                const f = e.dataTransfer?.files?.[0];
+                if (f) handleFile(f);
+              }}>
               <div className="ui">{preview ? '✅' : '📷'}</div>
               <p>{preview
                 ? <strong style={{ color: 'var(--green2)' }}>Imagen lista — toca para cambiar</strong>
                 : <><strong>Toca o arrastra</strong> la foto del comprobante</>}
               </p>
-              <p style={{ fontSize: 12, marginTop: 4, color: 'var(--text3)' }}>JPG · PNG · WEBP</p>
+              <p style={{ fontSize: 12, marginTop: 4, color: 'var(--text3)' }}>JPG · PNG · WEBP · HEIC (max {MAX_IMAGE_MB} MB)</p>
               <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }}
-                onChange={(e) => handleFile(e.target.files[0])} />
+                onChange={(e) => {
+                  const f = e.target?.files?.[0];
+                  if (f) handleFile(f);
+                }} />
             </div>
-            {preview && <img src={preview} className="prev" alt="preview" />}
+            {preview && (
+              <>
+                <img src={preview} className="prev" alt="preview"
+                  onError={() => { /* HEIC no previsualiza en algunos browsers — no es bloqueante */ }} />
+                <button type="button" className="btn sm ghost" style={{ marginTop: 8 }} onClick={limpiarFoto}>
+                  Quitar foto
+                </button>
+              </>
+            )}
           </div>
 
           <div className="fg" style={{ marginTop: 14 }}>
@@ -981,11 +1105,11 @@ function MisAportes({ user, config, showToast }) {
               <input value={nota} onChange={(e) => setNota(e.target.value)} placeholder="Nequi, Bancolombia..." />
             </div>
           </div>
-          <div style={{ display: 'flex', gap: 10, marginTop: 14 }}>
-            <button className="btn primary" onClick={registrar} disabled={saving}>
+          <div style={{ display: 'flex', gap: 10, marginTop: 14, flexWrap: 'wrap' }}>
+            <button className="btn primary" onClick={registrar} disabled={saving || !file}>
               {saving ? 'Subiendo…' : `Enviar Aporte — ${mesSel}`}
             </button>
-            <button className="btn ghost" onClick={() => { setShowForm(false); setFile(null); setPreview(null); }}>
+            <button className="btn ghost" onClick={cerrarForm} disabled={saving}>
               Cancelar
             </button>
           </div>
@@ -1001,26 +1125,22 @@ function MisAportes({ user, config, showToast }) {
             const esFuturo = i > idxActual;
             const esActual = i === idxActual;
             let cls = 'fut';
+            let icon = '◽';
+            let texto = '';
             if (a) {
-              cls = a.estado === 'confirmado' ? 'paid' : 'pend';
+              if (a.estado === 'confirmado') { cls = 'paid'; icon = '✅'; texto = 'Pagado'; }
+              else if (a.estado === 'rechazado') { cls = 'rech'; icon = '⚠️'; texto = 'Rechazado'; }
+              else { cls = 'pend'; icon = '⏳'; texto = 'Pendiente'; }
             } else if (esActual) {
-              cls = 'curr';
+              cls = 'curr'; icon = '📅'; texto = 'Pendiente';
             } else if (!esFuturo) {
-              cls = 'miss';
+              cls = 'miss'; icon = '❌'; texto = 'Faltó';
             }
             return (
               <div key={m} className={`mc ${cls}`}>
                 <div className="mc-n">{MESES_ABR[i]}</div>
-                <div className="mc-i">
-                  {a
-                    ? (a.estado === 'confirmado' ? '✅' : '⏳')
-                    : esFuturo ? '◽' : esActual ? '📅' : '❌'}
-                </div>
-                <div className="mc-s">
-                  {a
-                    ? (a.estado === 'confirmado' ? 'Pagado' : 'Pendiente')
-                    : esFuturo ? '' : esActual ? 'Pendiente' : 'Faltó'}
-                </div>
+                <div className="mc-i">{icon}</div>
+                <div className="mc-s">{texto}</div>
               </div>
             );
           })}
@@ -1045,8 +1165,8 @@ function MisAportes({ user, config, showToast }) {
                     <td style={{ fontFamily: 'monospace', fontSize: 12 }}>{a.comprobante}</td>
                     <td style={{ fontSize: 12 }}>{a.fecha}</td>
                     <td>
-                      <span className={`badge ${a.estado === 'confirmado' ? 'bg' : 'bgo'}`}>
-                        {a.estado === 'confirmado' ? '✓ Confirmado' : '⏳ Pendiente'}
+                      <span className={`badge ${a.estado === 'confirmado' ? 'bg' : a.estado === 'rechazado' ? 'br' : 'bgo'}`}>
+                        {a.estado === 'confirmado' ? '✓ Confirmado' : a.estado === 'rechazado' ? '✗ Rechazado' : '⏳ Pendiente'}
                       </span>
                     </td>
                   </tr>
@@ -2215,7 +2335,6 @@ function Alianzas({ user, showToast }) {
   const [saving, setSaving] = useState(false);
 
   const activas = (alianzas || []).filter(a => a.activo);
-  const categorias = [...new Set((alianzas || []).map(a => a.categoria).filter(Boolean))];
 
   const crear = async () => {
     if (!form.nombre || !form.descuento) { showToast('Nombre y descuento son obligatorios.', 'err'); return; }
@@ -2346,7 +2465,7 @@ function Alianzas({ user, showToast }) {
 }
 
 /* ─────────────────────────────────────────────────────────────
-   NOTICIAS
+   NOTICIAS — ⚡ FIX: createObjectURL + uploadMedia (bucket correcto)
 ───────────────────────────────────────────────────────────── */
 function Noticias({ user, showToast, setLight }) {
   const { data: noticias, refetch } = useQuery(() => api.getNoticias(), []);
@@ -2355,32 +2474,49 @@ function Noticias({ user, showToast, setLight }) {
   const [file, setFile] = useState(null);
   const [preview, setPreview] = useState(null);
   const [saving, setSaving] = useState(false);
-  const fileRef = useRef();
+  const fileRef = useRef(null);
+
+  useEffect(() => () => { revokeIfBlob(preview); }, []); // eslint-disable-line
 
   const handleFile = (f) => {
-    if (!f || !f.type.startsWith('image/')) return;
-    setFile(f);
-    const r = new FileReader();
-    r.onload = (e) => setPreview(e.target.result);
-    r.readAsDataURL(f);
+    try {
+      const err = validateImage(f);
+      if (err) { showToast(err, 'err'); return; }
+      revokeIfBlob(preview);
+      setFile(f);
+      setPreview(URL.createObjectURL(f));
+    } catch (ex) {
+      console.error('[Noticias.handleFile]', ex);
+      showToast('No se pudo cargar la imagen.', 'err');
+      setFile(null); setPreview(null);
+    }
+  };
+
+  const cerrarForm = () => {
+    revokeIfBlob(preview);
+    setShowForm(false);
+    setForm({ titulo: '', contenido: '' });
+    setFile(null);
+    setPreview(null);
   };
 
   const publicar = async () => {
     if (!form.titulo) { showToast('El titulo es obligatorio.', 'err'); return; }
+    if (saving) return;
     setSaving(true);
     try {
       let foto_url = null;
       if (file) {
-        foto_url = await api.uploadComprobante(file, user.id);
+        foto_url = await api.uploadMedia(file, user.id);
       }
       await api.createNoticia({ titulo: form.titulo, contenido: form.contenido, foto_url, autor_id: user.id, activo: true });
-      setShowForm(false);
-      setForm({ titulo: '', contenido: '' });
-      setFile(null);
-      setPreview(null);
+      cerrarForm();
       showToast('Noticia publicada.');
       refetch();
-    } catch (e) { showToast(e.message, 'err'); } finally { setSaving(false); }
+    } catch (e) {
+      console.error('[Noticias.publicar]', e);
+      showToast('Error al publicar: ' + (e?.message || 'intenta de nuevo'), 'err');
+    } finally { setSaving(false); }
   };
 
   const eliminar = async (n) => {
@@ -2402,7 +2538,7 @@ function Noticias({ user, showToast, setLight }) {
       </div>
 
       <div style={{ marginBottom: 16 }}>
-        <button className="btn primary" onClick={() => setShowForm(v => !v)}>
+        <button className="btn primary" onClick={() => showForm ? cerrarForm() : setShowForm(true)}>
           {showForm ? 'Cancelar' : '+ Publicar noticia'}
         </button>
       </div>
@@ -2423,17 +2559,18 @@ function Noticias({ user, showToast, setLight }) {
             </div>
             <div className="field ff">
               <label>Foto (opcional)</label>
-              <div className="uz" onClick={() => fileRef.current.click()} style={{ padding: 16 }}>
+              <div className="uz" onClick={() => { try { fileRef.current?.click(); } catch (_) { } }} style={{ padding: 16 }}>
                 <div className="ui">{preview ? '✅' : '📷'}</div>
                 <p>{preview ? <strong style={{ color: 'var(--green2)' }}>Imagen lista</strong> : <><strong>Toca</strong> para agregar foto</>}</p>
-                <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={e => handleFile(e.target.files[0])} />
+                <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }}
+                  onChange={e => { const f = e.target?.files?.[0]; if (f) handleFile(f); }} />
               </div>
               {preview && <img src={preview} className="prev" alt="preview" />}
             </div>
           </div>
           <div style={{ display: 'flex', gap: 10, marginTop: 14 }}>
             <button className="btn primary" onClick={publicar} disabled={saving}>{saving ? 'Publicando...' : 'Publicar'}</button>
-            <button className="btn ghost" onClick={() => { setShowForm(false); setFile(null); setPreview(null); }}>Cancelar</button>
+            <button className="btn ghost" onClick={cerrarForm} disabled={saving}>Cancelar</button>
           </div>
         </div>
       )}
@@ -2471,7 +2608,7 @@ function Noticias({ user, showToast, setLight }) {
 }
 
 /* ─────────────────────────────────────────────────────────────
-   EVENTOS
+   EVENTOS — ya usaba createObjectURL, solo se reforzo
 ───────────────────────────────────────────────────────────── */
 function Eventos({ user, showToast, setLight }) {
   const { data: eventos, refetch } = useQuery(() => api.getEventos(), []);
@@ -2480,17 +2617,26 @@ function Eventos({ user, showToast, setLight }) {
   const [file, setFile] = useState(null);
   const [preview, setPreview] = useState(null);
   const [saving, setSaving] = useState(false);
-  const fileRef = useRef();
+  const fileRef = useRef(null);
+
+  useEffect(() => () => { revokeIfBlob(preview); }, []); // eslint-disable-line
 
   const handleFile = (f) => {
-    if (!f || !f.type.startsWith('image/')) return;
-    if (preview && preview.startsWith('blob:')) URL.revokeObjectURL(preview);
-    setFile(f);
-    setPreview(URL.createObjectURL(f));
+    try {
+      const err = validateImage(f);
+      if (err) { showToast(err, 'err'); return; }
+      revokeIfBlob(preview);
+      setFile(f);
+      setPreview(URL.createObjectURL(f));
+    } catch (ex) {
+      console.error('[Eventos.handleFile]', ex);
+      showToast('No se pudo cargar la imagen.', 'err');
+      setFile(null); setPreview(null);
+    }
   };
 
   const limpiarForm = () => {
-    if (preview && preview.startsWith('blob:')) URL.revokeObjectURL(preview);
+    revokeIfBlob(preview);
     setShowForm(false);
     setForm({ titulo: '', descripcion: '', fecha_evento: '', lugar: '' });
     setFile(null);
@@ -2508,7 +2654,10 @@ function Eventos({ user, showToast, setLight }) {
       limpiarForm();
       showToast('Evento publicado.');
       refetch();
-    } catch (e) { showToast('Error al publicar: ' + (e.message || 'Intenta de nuevo'), 'err'); } finally { setSaving(false); }
+    } catch (e) {
+      console.error('[Eventos.publicar]', e);
+      showToast('Error al publicar: ' + (e?.message || 'Intenta de nuevo'), 'err');
+    } finally { setSaving(false); }
   };
 
   const eliminar = async (e) => {
@@ -2576,10 +2725,11 @@ function Eventos({ user, showToast, setLight }) {
             </div>
             <div className="field ff">
               <label>Foto (opcional)</label>
-              <div className="uz" onClick={() => fileRef.current.click()} style={{ padding: 16 }}>
+              <div className="uz" onClick={() => { try { fileRef.current?.click(); } catch (_) { } }} style={{ padding: 16 }}>
                 <div className="ui">{preview ? '✅' : '📷'}</div>
                 <p>{preview ? <strong style={{ color: 'var(--green2)' }}>Imagen lista</strong> : <><strong>Toca</strong> para agregar foto</>}</p>
-                <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={e => handleFile(e.target.files[0])} />
+                <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }}
+                  onChange={e => { const f = e.target?.files?.[0]; if (f) handleFile(f); }} />
               </div>
               {preview && <img src={preview} className="prev" alt="preview" />}
             </div>
@@ -2613,7 +2763,7 @@ function Eventos({ user, showToast, setLight }) {
 }
 
 /* ─────────────────────────────────────────────────────────────
-   MERCH
+   MERCH — ⚡ FIX: createObjectURL en vez de base64
 ───────────────────────────────────────────────────────────── */
 function Merch({ user, showToast, setLight }) {
   const { data: productos, refetch } = useQuery(() => api.getMerch(), []);
@@ -2623,22 +2773,40 @@ function Merch({ user, showToast, setLight }) {
   const [file, setFile] = useState(null);
   const [preview, setPreview] = useState(null);
   const [saving, setSaving] = useState(false);
-  const fileRef = useRef();
+  const fileRef = useRef(null);
 
-  const WHATSAPP_ADMIN = '573001234567'; // Cambia por el numero del admin
+  const WHATSAPP_ADMIN = '573001234567';
+
+  useEffect(() => () => { revokeIfBlob(preview); }, []); // eslint-disable-line
 
   const disponibles = (productos || []).filter(p => p.disponible);
 
   const handleFile = (f) => {
-    if (!f || !f.type.startsWith('image/')) return;
-    setFile(f);
-    const r = new FileReader();
-    r.onload = (e) => setPreview(e.target.result);
-    r.readAsDataURL(f);
+    try {
+      const err = validateImage(f);
+      if (err) { showToast(err, 'err'); return; }
+      revokeIfBlob(preview);
+      setFile(f);
+      setPreview(URL.createObjectURL(f));
+    } catch (ex) {
+      console.error('[Merch.handleFile]', ex);
+      showToast('No se pudo cargar la imagen.', 'err');
+      setFile(null); setPreview(null);
+    }
+  };
+
+  const cancelar = () => {
+    revokeIfBlob(preview);
+    setShowForm(false);
+    setEditId(null);
+    setForm({ nombre: '', descripcion: '', precio: '', tallas: '', colores: '', stock: '0' });
+    setFile(null);
+    setPreview(null);
   };
 
   const crear = async () => {
     if (!form.nombre || !form.precio) { showToast('Nombre y precio son obligatorios.', 'err'); return; }
+    if (saving) return;
     setSaving(true);
     try {
       let foto_url = null;
@@ -2653,27 +2821,35 @@ function Merch({ user, showToast, setLight }) {
         foto_url,
         disponible: true,
       });
-      setShowForm(false);
-      setForm({ nombre: '', descripcion: '', precio: '', tallas: '', colores: '', stock: '0' });
-      setFile(null);
-      setPreview(null);
+      cancelar();
       showToast('Producto agregado.');
       refetch();
-    } catch (e) { showToast(e.message, 'err'); } finally { setSaving(false); }
+    } catch (e) {
+      console.error('[Merch.crear]', e);
+      showToast('Error: ' + (e?.message || 'intenta de nuevo'), 'err');
+    } finally { setSaving(false); }
   };
 
   const abrirEditar = (p) => {
+    revokeIfBlob(preview);
     setEditId(p.id);
     setForm({ nombre: p.nombre, descripcion: p.descripcion || '', precio: String(p.precio), tallas: p.tallas || '', colores: p.colores || '', stock: String(p.stock || 0) });
-    setPreview(p.foto_url || null);
+    setFile(null);
+    setPreview(p.foto_url || null); // URL remota, no blob
     setShowForm(true);
   };
 
   const guardarEdicion = async () => {
+    if (saving) return;
     setSaving(true);
     try {
-      let foto_url = preview && !file ? preview : null;
-      if (file) foto_url = await api.uploadMedia(file, user.id);
+      // Si el preview es una URL remota (no blob) y no hay file nuevo, conservar foto_url
+      let foto_url = null;
+      if (file) {
+        foto_url = await api.uploadMedia(file, user.id);
+      } else if (preview && typeof preview === 'string' && !preview.startsWith('blob:')) {
+        foto_url = preview;
+      }
       await api.updateMerch(editId, {
         nombre: form.nombre,
         descripcion: form.descripcion,
@@ -2681,16 +2857,15 @@ function Merch({ user, showToast, setLight }) {
         tallas: form.tallas,
         colores: form.colores,
         stock: parseInt(form.stock) || 0,
-        ...(foto_url && { foto_url }),
+        ...(foto_url !== null && { foto_url }),
       });
-      setShowForm(false);
-      setEditId(null);
-      setForm({ nombre: '', descripcion: '', precio: '', tallas: '', colores: '', stock: '0' });
-      setFile(null);
-      setPreview(null);
+      cancelar();
       showToast('Producto actualizado.');
       refetch();
-    } catch (e) { showToast(e.message, 'err'); } finally { setSaving(false); }
+    } catch (e) {
+      console.error('[Merch.guardarEdicion]', e);
+      showToast('Error: ' + (e?.message || 'intenta de nuevo'), 'err');
+    } finally { setSaving(false); }
   };
 
   const toggleDisponible = async (p) => {
@@ -2699,14 +2874,6 @@ function Merch({ user, showToast, setLight }) {
       showToast(`Producto ${!p.disponible ? 'activado' : 'desactivado'}.`);
       refetch();
     } catch (e) { showToast(e.message, 'err'); }
-  };
-
-  const cancelar = () => {
-    setShowForm(false);
-    setEditId(null);
-    setForm({ nombre: '', descripcion: '', precio: '', tallas: '', colores: '', stock: '0' });
-    setFile(null);
-    setPreview(null);
   };
 
   const pedirPorWhatsApp = (p) => {
@@ -2741,10 +2908,11 @@ function Merch({ user, showToast, setLight }) {
             <div className="field ff"><label>Descripcion</label><input value={form.descripcion} onChange={e => setForm({ ...form, descripcion: e.target.value })} placeholder="Camiseta 100% algodon con logo bordado..." /></div>
             <div className="field ff">
               <label>Foto del producto</label>
-              <div className="uz" onClick={() => fileRef.current.click()} style={{ padding: 16 }}>
+              <div className="uz" onClick={() => { try { fileRef.current?.click(); } catch (_) { } }} style={{ padding: 16 }}>
                 <div className="ui">{preview ? '✅' : '📷'}</div>
                 <p>{preview ? <strong style={{ color: 'var(--green2)' }}>Imagen lista — toca para cambiar</strong> : <><strong>Toca</strong> para agregar foto</>}</p>
-                <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={e => handleFile(e.target.files[0])} />
+                <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }}
+                  onChange={e => { const f = e.target?.files?.[0]; if (f) handleFile(f); }} />
               </div>
               {preview && <img src={preview} className="prev" alt="preview" />}
             </div>
@@ -2768,14 +2936,12 @@ function Merch({ user, showToast, setLight }) {
               ) : (
                 <div style={{ width: '100%', height: '100%', background: 'linear-gradient(135deg, #f1f5f9, #e2e8f0)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 40 }}>👕</div>
               )}
-              {/* Overlay al hacer hover */}
               <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 8, opacity: 0, transition: 'opacity .2s' }}
                 onMouseEnter={e => e.currentTarget.style.opacity = '1'}
                 onMouseLeave={e => e.currentTarget.style.opacity = '0'}>
                 <div style={{ color: '#fff', fontWeight: 700, fontSize: 13, textAlign: 'center', marginBottom: 4 }}>{p.nombre}</div>
                 <div style={{ color: '#fbbf24', fontWeight: 800, fontSize: 14 }}>{COP(p.precio)}</div>
               </div>
-              {/* Badge sin stock */}
               {!p.disponible && (
                 <div style={{ position: 'absolute', top: 6, right: 6, background: 'rgba(239,68,68,0.9)', color: '#fff', fontSize: 9, fontWeight: 700, padding: '2px 6px', borderRadius: 10 }}>Sin stock</div>
               )}
@@ -2784,7 +2950,6 @@ function Merch({ user, showToast, setLight }) {
         </div>
       )}
 
-      {/* Detalle móvil — lista de productos con botón de pedir */}
       <div style={{ marginTop: 20 }}>
         {(productos || []).filter(p => p.disponible || user.is_admin).map(p => (
           <div key={p.id} style={{ display: 'flex', gap: 14, padding: '14px 0', borderBottom: '1px solid var(--border)', alignItems: 'center' }}>
