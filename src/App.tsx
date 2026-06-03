@@ -73,9 +73,14 @@ const validateImage = (f) => {
   }
   return null;
 };
-const revokeIfBlob = (url) => {
+const revokeIfBlob = (url, defer = false) => {
   if (url && typeof url === 'string' && url.startsWith('blob:')) {
-    try { URL.revokeObjectURL(url); } catch (_) { /* noop */ }
+    if (defer) {
+      // Diferir para que React termine de desmontar el <img> del DOM
+      setTimeout(() => { try { URL.revokeObjectURL(url); } catch (_) {} }, 100);
+    } else {
+      try { URL.revokeObjectURL(url); } catch (_) { /* noop */ }
+    }
   }
 };
 
@@ -948,10 +953,11 @@ function MisAportes({ user, config, showToast }) {
   const fileRef = useRef(null);
 
   // Limpiar el blob URL cuando se desmonta el componente
+  const previewRef = useRef(preview);
+  previewRef.current = preview;
   useEffect(() => {
-    return () => { revokeIfBlob(preview); };
-    // eslint-disable-next-line
-  }, []);
+    return () => { revokeIfBlob(previewRef.current); };
+  }, []); // eslint-disable-line
 
   const mes = mesActual();
   const idxActual = idxMesActual();
@@ -974,12 +980,12 @@ function MisAportes({ user, config, showToast }) {
       const err = validateImage(f);
       if (err) { showToast(err, 'err'); return; }
 
-      // Liberar el preview anterior si era un blob
-      revokeIfBlob(preview);
-
+      const old = preview;
       setFile(f);
       const url = URL.createObjectURL(f);
       setPreview(url);
+      // Diferir revoke del preview anterior para evitar removeChild en mobile
+      revokeIfBlob(old, true);
     } catch (ex) {
       console.error('[Aportes.handleFile]', ex);
       showToast('No se pudo cargar la imagen. Intenta con otra foto.', 'err');
@@ -989,19 +995,21 @@ function MisAportes({ user, config, showToast }) {
   };
 
   const limpiarFoto = () => {
-    revokeIfBlob(preview);
+    const old = preview;
     setFile(null);
     setPreview(null);
     if (fileRef.current) fileRef.current.value = '';
+    revokeIfBlob(old, true); // defer: dejar que React desmonte el <img> primero
   };
 
   const cerrarForm = () => {
-    revokeIfBlob(preview);
+    const old = preview;
     setShowForm(false);
     setFile(null);
     setPreview(null);
     setComp('');
     setNota('');
+    revokeIfBlob(old, true); // defer: dejar que React desmonte el <img> primero
   };
 
   const registrar = async () => {
@@ -1085,13 +1093,13 @@ function MisAportes({ user, config, showToast }) {
                 }} />
             </div>
             {preview && (
-              <>
+              <div key={preview}>
                 <img src={preview} className="prev" alt="preview"
                   onError={() => { /* HEIC no previsualiza en algunos browsers — no es bloqueante */ }} />
                 <button type="button" className="btn sm ghost" style={{ marginTop: 8 }} onClick={limpiarFoto}>
                   Quitar foto
                 </button>
-              </>
+              </div>
             )}
           </div>
 
