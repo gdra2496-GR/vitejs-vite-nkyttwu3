@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
-const SUPABASE_URL = 'https://dikrihjhzoqyayibynmb.supabase.co';
+const SUPABASE_URL = 'https://ayxbhcrokrlavkbmlmjx.supabase.co'; // ← Nuevo proyecto Supabase para CashDave II
 const SUPABASE_ANON =
-  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRpa3JpaGpoem9xeWF5aWJ5bm1iIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzIyMjAyMTEsImV4cCI6MjA4Nzc5NjIxMX0.nPwuz_JHMzqMJMh3iTSq_974PsUe4r9EMmmMTkEemew';
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImF5eGJoY3Jva3JsYXZrYm1sbWp4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEwNTM0NTEsImV4cCI6MjA5NjYyOTQ1MX0.pRrmhmlLSIqpbdcmNk19cV9yUKkCyojBH7L8VuCLa_s'; // ← anon key del nuevo proyecto
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON);
 
@@ -24,22 +24,23 @@ const FROM_DB = (n) => Math.round(n || 0);
 
 // Los 12 meses del fondo en orden, con su año correcto
 const MESES_FONDO = [
-  'Diciembre 2025',
-  'Enero 2026',
-  'Febrero 2026',
-  'Marzo 2026',
-  'Abril 2026',
-  'Mayo 2026',
   'Junio 2026',
   'Julio 2026',
   'Agosto 2026',
   'Septiembre 2026',
   'Octubre 2026',
   'Noviembre 2026',
+  'Diciembre 2026',
+  'Enero 2027',
+  'Febrero 2027',
+  'Marzo 2027',
+  'Abril 2027',
+  'Mayo 2027',
+  'Junio 2027',
 ];
 
 // Abreviaturas para el calendario
-const MESES_ABR = ['Dic', 'Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov'];
+const MESES_ABR = ['Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic', 'Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun-27'];
 
 // Mes actual como string "Marzo 2026"
 const mesActual = () => {
@@ -610,7 +611,7 @@ export default function App() {
     return (
       <>
         <style>{CSS}</style>
-        <div className="spin" style={{ height: '100vh' }}>Cargando Fondo Solidario...</div>
+        <div className="spin" style={{ height: '100vh' }}>Cargando CashDave II...</div>
       </>
     );
 
@@ -1029,7 +1030,7 @@ function MisAportes({ user, config, showToast }) {
         estado: 'pendiente',
       });
       cerrarForm();
-      showToast('¡Aporte enviado! Esperando confirmación del admin.');
+      showToast("¡Aporte enviado! Esperando confirmación del admin.');
       refetch();
     } catch (e) {
       console.error('[Aportes.registrar]', e);
@@ -1126,7 +1127,7 @@ function MisAportes({ user, config, showToast }) {
 
       {/* Calendario de estado por mes */}
       <div className="card">
-        <div className="ct">Estado del Fondo 2025–2026</div>
+        <div className="ct">Estado del Fondo 2026–2027</div>
         <div className="mgrid">
           {MESES_FONDO.map((m, i) => {
             const a = (aportes || []).find((ap) => ap.mes === m);
@@ -1174,7 +1175,7 @@ function MisAportes({ user, config, showToast }) {
                     <td style={{ fontSize: 12 }}>{a.fecha}</td>
                     <td>
                       <span className={`badge ${a.estado === 'confirmado' ? 'bg' : a.estado === 'rechazado' ? 'br' : 'bgo'}`}>
-                        {a.estado === 'confirmado' ? '✓ Confirmado' : a.estado === 'rechazado' ? '✗ Rechazado' : '⏳ Pendiente'}
+                       {a.estado === 'confirmado' ? '✓ Confirmado' : a.estado === 'rechazado' ? '✗ Rechazado' : '⏳ Pendiente'}
                       </span>
                     </td>
                   </tr>
@@ -1194,7 +1195,7 @@ function MisAportes({ user, config, showToast }) {
 function AdminAportes({ config, showToast, setLight }) {
   const [filter, setFilter] = useState('pendiente');
   const { data: aportes, refetch } = useQuery(
-    () => api.getAportes(filter === 'todos' ? {} : { estado: filter }),
+    () => api.getAportes(filter === 'todos' ? {}  : { estado: filter }),
     [filter]
   );
 
