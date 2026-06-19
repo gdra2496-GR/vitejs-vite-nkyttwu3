@@ -1030,7 +1030,7 @@ function MisAportes({ user, config, showToast }) {
         estado: 'pendiente',
       });
       cerrarForm();
-      showToast("¡Aporte enviado! Esperando confirmación del admin.');
+      showToast('¡Aporte enviado! Esperando confirmación del admin.');
       refetch();
     } catch (e) {
       console.error('[Aportes.registrar]', e);
