@@ -59,12 +59,7 @@ const today = () => new Date().toISOString().split('T')[0];
 
 // ─── Utilidades de imagen (anti-blank-screen en mobile) ───
 const MAX_IMAGE_MB = 15;
-const isImageFile = (f) => {
-  if (!f) return false;
-  if (f.type && f.type.startsWith('image/')) return true;
-  // Algunos browsers Android/iPhone no setean type bien; fallback por extension
-  return /\.(jpe?g|png|webp|heic|heif|gif|bmp)$/i.test(f.name || '');
-};
+const isImageFile = (f) => { if (!f) return false; if (f.type) return f.type.startsWith('image/'); if (f.name && /\.(jpe?g|png|webp|heic|heif|gif|bmp)$/i.test(f.name)) return true; return !f.name; };
 const validateImage = (f) => {
   if (!f) return 'No se selecciono ningun archivo.';
   if (!isImageFile(f)) return 'Selecciona una imagen valida (JPG, PNG, WEBP o HEIC).';
