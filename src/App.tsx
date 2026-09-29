@@ -1018,16 +1018,31 @@ function MisAportes({ user, config, showToast }) {
     setSaving(true);
     try {
       const fotoUrl = await api.uploadComprobante(file, user.id);
-      await api.createAporte({
-        miembro_id: user.id,
-        monto: user.monto_mensual || config.monto_mensual,
-        mes: mesSel,
-        fecha: today(),
-        comprobante: comp || '—',
-        foto_url: fotoUrl,
-        nota,
-        estado: 'pendiente',
-      });
+      // Si el mes ya tiene un aporte rechazado, actualizar ese registro en vez de crear uno nuevo
+      const aporteRechazado = (aportes || []).find(
+        (a) => a.mes === mesSel && a.estado === 'rechazado'
+      );
+      if (aporteRechazado) {
+        await api.updateAporte(aporteRechazado.id, {
+          monto: user.monto_mensual || config.monto_mensual,
+          fecha: today(),
+          comprobante: comp || '—',
+          foto_url: fotoUrl,
+          nota,
+          estado: 'pendiente',
+        });
+      } else {
+        await api.createAporte({
+          miembro_id: user.id,
+          monto: user.monto_mensual || config.monto_mensual,
+          mes: mesSel,
+          fecha: today(),
+          comprobante: comp || '—',
+          foto_url: fotoUrl,
+          nota,
+          estado: 'pendiente',
+        });
+      }
       cerrarForm();
       showToast('¡Aporte enviado! Esperando confirmación del admin.');
       refetch();
@@ -1046,6 +1061,26 @@ function MisAportes({ user, config, showToast }) {
         <p>Sube tu comprobante mensual de transferencia</p>
       </div>
 
+      {/* Alerta de meses rechazados — mostrar siempre que haya rechazados disponibles para re-subir */}
+      {(() => {
+        const rechazados = (aportes || []).filter(
+          (a) => a.estado === 'rechazado' && mesesDisponibles.includes(a.mes)
+        );
+        if (!rechazados.length) return null;
+        return (
+          <div className="al warn">
+            ⚠️ <strong>{rechazados.length === 1 ? 'Tu aporte fue rechazado' : `${rechazados.length} aportes fueron rechazados`}</strong>:{' '}
+            {rechazados.map((a) => a.mes).join(', ')}.
+            {!showForm && (
+              <button className="btn sm primary" style={{ marginLeft: 12 }}
+                onClick={() => { setMesSel(rechazados[0].mes); setShowForm(true); }}>
+                Re-subir comprobante
+              </button>
+            )}
+          </div>
+        );
+      })()}
+
       {mesesDisponibles.length > 0 && !showForm && (
         <div className="al info">
           📅 Tienes <strong>{mesesDisponibles.length} mes(es)</strong> sin registrar.
@@ -1054,11 +1089,24 @@ function MisAportes({ user, config, showToast }) {
           </button>
         </div>
       )}
+      {mesesDisponibles.length === 0 && !showForm && (
+        <div className="al ok">
+          ✅ Estás al día — todos tus meses están confirmados o en revisión.
+        </div>
+      )}
 
       {showForm && (
         <div className="card" style={{ borderTop: '3px solid var(--accent)' }}>
-          <div className="ct">Registrar Aporte</div>
-          <div className="cs">{COP(user.monto_mensual || config.monto_mensual)} · Sube la foto de tu transferencia</div>
+          <div className="ct">
+            {(aportes || []).some((a) => a.mes === mesSel && a.estado === 'rechazado')
+              ? `Re-enviar Comprobante — ${mesSel}`
+              : 'Registrar Aporte'}
+          </div>
+          <div className="cs">
+            {(aportes || []).some((a) => a.mes === mesSel && a.estado === 'rechazado')
+              ? `El comprobante anterior de ${mesSel} fue rechazado. Sube uno nuevo.`
+              : `${COP(user.monto_mensual || config.monto_mensual)} · Sube la foto de tu transferencia`}
+          </div>
 
           <div className="field" style={{ marginTop: 16 }}>
             <label>¿A qué mes corresponde este pago?</label>
