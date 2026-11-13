@@ -58,12 +58,49 @@ const today = () => new Date().toISOString().split('T')[0];
 
 // ─── Utilidades de imagen (anti-blank-screen en mobile) ───
 const MAX_IMAGE_MB = 15;
+const IMG_EXT_RE = /\.(jpe?g|png|webp|heic|heif|gif|bmp)$/i;
+// Android a veces entrega la foto sin tipo, con "application/octet-stream" o sin extension
+// (Google Fotos, Drive, galeria en la nube). Solo rechazamos lo que claramente NO es imagen.
 const isImageFile = (f) => {
   if (!f) return false;
-  if (f.type && f.type.startsWith('image/')) return true;
-  // Algunos browsers Android/iPhone no setean type bien; fallback por extension
-  return /\.(jpe?g|png|webp|heic|heif|gif|bmp)$/i.test(f.name || '');
+  const t = (f.type || '').toLowerCase();
+  const n = f.name || '';
+  if (t.startsWith('image/')) return true;
+  if (IMG_EXT_RE.test(n)) return true;
+  if (!t || t === 'application/octet-stream') return !/\.[a-z0-9]{2,5}$/i.test(n);
+  return false;
 };
+// Extension y tipo seguros para guardar en Storage aunque el telefono no los reporte
+const imgExt = (f) => {
+  const m = (f?.name || '').match(IMG_EXT_RE);
+  return m ? m[1].toLowerCase().replace('jpeg', 'jpg') : 'jpg';
+};
+const imgType = (f) => {
+  const t = (f?.type || '').toLowerCase();
+  if (t.startsWith('image/')) return t;
+  const e = imgExt(f);
+  return e === 'jpg' ? 'image/jpeg' : `image/${e}`;
+};
+
+// ─── Normalizar el texto del mes ("Febrero 2026 2026", "marzo de 2026" -> "Marzo 2026") ───
+const normMes = (s) => {
+  if (!s || typeof s !== 'string') return s;
+  const m = s.trim().match(/^([A-Za-zÁÉÍÓÚáéíóúñÑ]+)\s+(?:de\s+)?(\d{4})(?:\s+\d{4})*$/i);
+  if (!m) return s.trim();
+  const mes = m[1].toLowerCase();
+  return `${mes.charAt(0).toUpperCase()}${mes.slice(1)} ${m[2]}`;
+};
+// Si hay varios aportes para el mismo mes, mostrar el mejor estado
+const PRIORIDAD_ESTADO = { confirmado: 3, pendiente: 2, rechazado: 1 };
+const mejorAporte = (lista) =>
+  (lista || []).reduce((best, a) =>
+    !best || (PRIORIDAD_ESTADO[a.estado] || 0) > (PRIORIDAD_ESTADO[best.estado] || 0) ? a : best, null);
+
+// ─── Sesion guardada en el telefono (Android recarga la pagina al abrir camara/galeria) ───
+const SESSION_KEY = 'cashdave_session_cedula';
+const loadSessionCedula = () => { try { return localStorage.getItem(SESSION_KEY) || null; } catch (_) { return null; } };
+const saveSession = (cedula) => { try { if (cedula) localStorage.setItem(SESSION_KEY, String(cedula)); } catch (_) { } };
+const clearSession = () => { try { localStorage.removeItem(SESSION_KEY); } catch (_) { } };
 const validateImage = (f) => {
   if (!f) return 'No se selecciono ningun archivo.';
   if (!isImageFile(f)) return 'Selecciona una imagen valida (JPG, PNG, WEBP o HEIC).';
@@ -181,7 +218,7 @@ const api = {
     if (filter.miembro_id) q = q.eq('miembro_id', filter.miembro_id);
     if (filter.estado) q = q.eq('estado', filter.estado);
     const { data } = await q;
-    return data || [];
+    return (data || []).map((a) => ({ ...a, mes: normMes(a.mes) }));
   },
   async createAporte(a) {
     const { error } = await supabase.from('aportes').insert(a);
@@ -191,11 +228,26 @@ const api = {
     const { error } = await supabase.from('aportes').update(patch).eq('id', id);
     if (error) throw new Error(error.message);
   },
+  // Confirma solo si sigue pendiente (evita doble confirmación). Devuelve true si cambió.
+  async confirmarAporteSiPendiente(id) {
+    const { data, error } = await supabase.from('aportes').update({ estado: 'confirmado' })
+      .eq('id', id).eq('estado', 'pendiente').select('id');
+    if (error) throw new Error(error.message);
+    return (data || []).length > 0;
+  },
+  // Suma al saldo leyendo el valor ACTUAL en la base de datos (no el de la lista en pantalla)
+  async sumarSaldo(miembroId, monto) {
+    const { data, error } = await supabase.from('miembros').select('saldo').eq('id', miembroId).single();
+    if (error) throw new Error(error.message);
+    const nuevo = (data?.saldo || 0) + monto;
+    await api.updateMiembro(miembroId, { saldo: nuevo });
+    return nuevo;
+  },
   async uploadComprobante(file, miembroId) {
-    const ext = (file.name?.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg';
+    const ext = imgExt(file);
     const path = `${miembroId}/${Date.now()}.${ext}`;
     const { error } = await supabase.storage.from('comprobantes').upload(path, file, {
-      contentType: file.type || 'image/jpeg',
+      contentType: imgType(file),
       upsert: false,
     });
     if (error) throw new Error(error.message);
@@ -203,10 +255,10 @@ const api = {
     return data.publicUrl;
   },
   async uploadMedia(file, userId) {
-    const ext = (file.name?.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg';
+    const ext = imgExt(file);
     const path = `${userId}/${Date.now()}.${ext}`;
     const { error } = await supabase.storage.from('media').upload(path, file, {
-      contentType: file.type || 'image/jpeg',
+      contentType: imgType(file),
       upsert: false,
     });
     if (error) throw new Error(error.message);
@@ -563,6 +615,7 @@ tbody tr:hover td{background:rgba(255,255,255,.02)}
 ───────────────────────────────────────────────────────────── */
 export default function App() {
   const [user, setUser] = useState(null);
+  const [restoring, setRestoring] = useState(() => !!loadSessionCedula());
   const [tab, setTab] = useState('home');
   const [nav, setNav] = useState(false);
   const [toast, setToast] = useState(null);
@@ -571,12 +624,24 @@ export default function App() {
 
   useEffect(() => { api.getConfig().then((c) => setConfig(c)); }, []);
 
+  // Restaurar la sesion guardada (se valida otra vez contra la base de datos)
+  useEffect(() => {
+    const ced = loadSessionCedula();
+    if (!ced) return;
+    api.getMiembroByCedula(ced)
+      .then((m) => { if (m && m.activo) setUser(m); else clearSession(); })
+      .catch(() => { })
+      .finally(() => setRestoring(false));
+  }, []);
+
+  const loginUser = (m) => { saveSession(m?.cedula); setUser(m); };
+
   const showToast = useCallback((msg, type = 'ok') => {
     setToast({ msg, type });
     setTimeout(() => setToast(null), 3500);
   }, []);
 
-  const logout = () => { setUser(null); setTab('home'); };
+  const logout = () => { clearSession(); setUser(null); setTab('home'); };
 
   const adminNav = [
     { id: 'home', icon: '📊', label: 'Dashboard' },
@@ -606,7 +671,7 @@ export default function App() {
   ];
   const navItems = user?.is_admin ? adminNav : memberNav;
 
-  if (!config)
+  if (!config || restoring)
     return (
       <>
         <style>{CSS}</style>
@@ -618,7 +683,7 @@ export default function App() {
     return (
       <>
         <style>{CSS}</style>
-        <AuthScreen config={config} onLogin={setUser} showToast={showToast} />
+        <AuthScreen config={config} onLogin={loginUser} showToast={showToast} />
         {toast && <div className={`toast ${toast.type === 'err' ? 'err' : ''}`}>{toast.msg}</div>}
       </>
     );
@@ -917,7 +982,7 @@ function AdminDash({ config, setTab, showToast }) {
           <div className="empty"><div className="ei">👥</div>Sin socios registrados.</div>
         ) : (
           activos.map((m) => {
-            const a = (aportes || []).find((ap) => ap.miembro_id === m.id && ap.mes === mes);
+            const a = mejorAporte((aportes || []).filter((ap) => ap.miembro_id === m.id && ap.mes === mes));
             return (
               <div className="mr" key={m.id}>
                 <div className="mav">{initials(m.nombre)}</div>
@@ -1177,7 +1242,7 @@ function MisAportes({ user, config, showToast }) {
         <div className="ct">Estado del Fondo 2025–2026</div>
         <div className="mgrid">
           {MESES_FONDO.map((m, i) => {
-            const a = (aportes || []).find((ap) => ap.mes === m);
+            const a = mejorAporte((aportes || []).filter((ap) => ap.mes === m));
             const esFuturo = i > idxActual;
             const esActual = i === idxActual;
             let cls = 'fut';
@@ -1246,17 +1311,22 @@ function AdminAportes({ config, showToast, setLight }) {
     [filter]
   );
 
+  const [procesando, setProcesando] = useState(null);
+
   const confirmar = async (a) => {
+    if (procesando) return;
+    setProcesando(a.id);
     try {
-      const saldoActual = a.miembros?.saldo || 0;
-      await api.updateAporte(a.id, { estado: 'confirmado' });
-      await api.updateMiembro(a.miembro_id, { saldo: saldoActual + a.monto });
+      const cambio = await api.confirmarAporteSiPendiente(a.id);
+      if (!cambio) { showToast('Este aporte ya no estaba pendiente.', 'err'); refetch(); return; }
+      await api.sumarSaldo(a.miembro_id, a.monto);
       showToast(`Aporte de ${a.miembros?.nombre} confirmado.`);
       refetch();
-    } catch (e) { showToast(e.message, 'err'); }
+    } catch (e) { showToast(e.message, 'err'); } finally { setProcesando(null); }
   };
 
   const rechazar = async (a) => {
+    if (procesando) return;
     try {
       await api.updateAporte(a.id, { estado: 'rechazado' });
       showToast('Aporte rechazado.');
@@ -1292,7 +1362,7 @@ function AdminAportes({ config, showToast, setLight }) {
         estado: 'confirmado',
         nota: 'Registro manual admin',
       });
-      await api.updateMiembro(m.id, { saldo: (m.saldo || 0) + monto });
+      await api.sumarSaldo(m.id, monto);
       showToast(`✅ Aporte de ${m.nombre} — ${mesSeleccionado} registrado.`);
       refetch();
     } catch (e) { showToast(e.message, 'err'); }
@@ -1335,8 +1405,8 @@ function AdminAportes({ config, showToast, setLight }) {
                     <td><span className={`badge ${a.estado === 'confirmado' ? 'bg' : a.estado === 'pendiente' ? 'bgo' : 'br'}`}>{a.estado}</span></td>
                     <td>{a.estado === 'pendiente' && (
                       <div style={{ display: 'flex', gap: 6 }}>
-                        <button className="btn sm success" onClick={() => confirmar(a)}>✓</button>
-                        <button className="btn sm danger" onClick={() => rechazar(a)}>✗</button>
+                        <button className="btn sm success" disabled={!!procesando} onClick={() => confirmar(a)}>{procesando === a.id ? '…' : '✓'}</button>
+                        <button className="btn sm danger" disabled={!!procesando} onClick={() => rechazar(a)}>✗</button>
                       </div>
                     )}</td>
                   </tr>
