@@ -22,21 +22,42 @@ const COP = (n) =>
 const RAW = (n) => Math.round(n || 0);
 const FROM_DB = (n) => Math.round(n || 0);
 
-// Los 12 meses del fondo en orden, con su año correcto
-const MESES_FONDO = [
-  'Diciembre 2025',
-  'Enero 2026',
-  'Febrero 2026',
-  'Marzo 2026',
-  'Abril 2026',
-  'Mayo 2026',
-  'Junio 2026',
-  'Julio 2026',
-  'Agosto 2026',
-  'Septiembre 2026',
-  'Octubre 2026',
-  'Noviembre 2026',
-];
+// ─── CICLOS DEL FONDO ───
+// Cada ciclo va de Diciembre (año inicio) a Noviembre (año siguiente).
+// El ciclo actual se calcula solo con la fecha: el 1 de diciembre arranca el nuevo.
+const NOMBRES_MES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+const PRIMER_CICLO = 2025; // Diciembre 2025 – Noviembre 2026
+const cicloInicioDe = (d = new Date()) => (d.getMonth() === 11 ? d.getFullYear() : d.getFullYear() - 1);
+const mesesDelCiclo = (ai) => [`Diciembre ${ai}`, ...NOMBRES_MES.slice(0, 11).map((n) => `${n} ${ai + 1}`)];
+const nombreCiclo = (ai) => `${ai}–${ai + 1}`;
+const enCiclo = (fecha, ai) => !!fecha && fecha >= `${ai}-12-01` && fecha <= `${ai + 1}-11-30`;
+// "Marzo 2026" -> "2026-03"
+const ymDeMes = (m) => {
+  const [nombre, anio] = (m || '').split(' ');
+  return `${anio}-${String(NOMBRES_MES.indexOf(nombre) + 1).padStart(2, '0')}`;
+};
+const CICLO_ACTUAL = cicloInicioDe();
+const CICLOS_DISPONIBLES = Array.from({ length: Math.max(1, CICLO_ACTUAL - PRIMER_CICLO + 1) }, (_, i) => CICLO_ACTUAL - i);
+
+// ─── LAPSO DE INGRESO DE CADA SOCIO (columna miembros.ciclo_ingreso) ───
+// En noviembre ya se inscriben socios para el lapso que arranca en diciembre.
+const CICLO_INSCRIPCION = new Date().getMonth() === 10 ? CICLO_ACTUAL + 1 : CICLO_ACTUAL;
+const cicloIngresoDe = (m) => m?.ciclo_ingreso ?? PRIMER_CICLO;
+// Lapso en el que el socio está aportando (un inscrito al próximo lapso todavía no participa del actual)
+const cicloDe = (m) => Math.max(CICLO_ACTUAL, cicloIngresoDe(m));
+// ¿El socio participa del lapso que está corriendo hoy?
+const enCicloActual = (m) => cicloIngresoDe(m) <= CICLO_ACTUAL;
+
+// Los 12 meses del ciclo actual, con su año correcto
+const MESES_FONDO = mesesDelCiclo(CICLO_ACTUAL);
+
+// Reparto de ganancias: por cada bloque COMPLETO de $100.000 de saldo
+const BLOQUE = 100000;
+const bloquesDe = (saldo) => Math.max(0, Math.floor((saldo || 0) / BLOQUE));
+// Deuda pendiente de un préstamo activo (cuotas que faltan, con su interés)
+const cuotaPrestamo = (p) => Math.round((FROM_DB(p.monto) * (1 + (p.interes / 100) * p.cuotas)) / p.cuotas);
+const deudaPrestamo = (p) => (p.cuotas - p.cuotas_pagadas) * cuotaPrestamo(p);
+const interesRestante = (p) => Math.round(FROM_DB(p.monto) * (p.interes / 100)) * (p.cuotas - p.cuotas_pagadas);
 
 // Abreviaturas para el calendario
 const MESES_ABR = ['Dic', 'Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov'];
@@ -291,6 +312,22 @@ const api = {
   async updateInversion(id, patch) {
     const { error } = await supabase.from('inversiones').update(patch).eq('id', id);
     if (error) throw new Error(error.message);
+  },
+  async getCiclos() {
+    const { data } = await supabase.from('ciclos').select('*').order('anio_inicio', { ascending: false });
+    return data || [];
+  },
+  async getLiquidaciones(filter = {}) {
+    let q = supabase.from('liquidaciones').select('*, ciclos(nombre, anio_inicio, fecha_cierre, valor_bloque), miembros(nombre, cedula)').order('created_at', { ascending: false });
+    if (filter.miembro_id) q = q.eq('miembro_id', filter.miembro_id);
+    if (filter.ciclo_id) q = q.eq('ciclo_id', filter.ciclo_id);
+    const { data } = await q;
+    return data || [];
+  },
+  async cerrarCiclo(params) {
+    const { data, error } = await supabase.rpc('cerrar_ciclo', params);
+    if (error) throw new Error(error.message);
+    return data;
   },
   async getGanancias() {
     const { data } = await supabase.from('ganancias').select('*').order('fecha', { ascending: false });
@@ -656,6 +693,7 @@ export default function App() {
     { id: 'noticias', icon: '📰', label: 'Noticias' },
     { id: 'eventos', icon: '🗓️', label: 'Eventos' },
     { id: 'merch', icon: '👕', label: 'Merch' },
+    { id: 'cierre', icon: '🔒', label: 'Cierre de ciclo' },
     { id: 'config', icon: '⚙️', label: 'Configuración' },
   ];
   const memberNav = [
@@ -740,6 +778,7 @@ export default function App() {
             {tab === 'noticias' && <Noticias user={user} showToast={showToast} setLight={setLight} />}
             {tab === 'eventos' && <Eventos user={user} showToast={showToast} setLight={setLight} />}
             {tab === 'merch' && <Merch user={user} showToast={showToast} setLight={setLight} />}
+            {tab === 'cierre' && user.is_admin && <AdminCierreCiclo showToast={showToast} />}
             {tab === 'config' && user.is_admin && <AdminConfig config={config} setConfig={setConfig} showToast={showToast} />}
           </ErrorBoundary>
         </main>
@@ -812,29 +851,43 @@ function MemberDash({ user, config }) {
   const { data: prestamos } = useQuery(() => api.getPrestamos({ miembro_id: user.id }), [user.id]);
   const { data: ganancias } = useQuery(() => api.getGanancias(), []);
   const { data: allMiembros } = useQuery(() => api.getMiembros(), []);
+  const { data: liquidaciones } = useQuery(() => api.getLiquidaciones({ miembro_id: user.id }), [user.id]);
 
   if (loading) return <div className="spin">Cargando tu información…</div>;
 
-  const mes = mesActual();
-  const misAportes = (aportes || []).filter((a) => a.estado === 'confirmado');
+  // Lapso del socio: si se inscribió al próximo lapso, todavía no participa del actual
+  const cicloU = cicloDe(miembro || user);
+  const esNuevoLapso = cicloU > CICLO_ACTUAL;
+  const mesesU = mesesDelCiclo(cicloU);
+  const mes = esNuevoLapso ? mesesU[0] : mesActual();
+  const confirmados = (aportes || []).filter((a) => a.estado === 'confirmado');
+  // Meses pagados / aportes confirmados: solo del lapso del socio
+  const misAportes = confirmados.filter((a) => mesesU.includes(a.mes));
+  const ultimaLiq = (liquidaciones || [])[0];
   const pagadoMes = (aportes || []).some((a) => a.mes === mes && a.estado === 'confirmado');
   const pendiente = (aportes || []).some((a) => a.mes === mes && a.estado === 'pendiente');
   const prestAct = (prestamos || []).filter((p) => p.estado === 'activo');
 
-  // Total aportado = suma directa de montos en pesos
+  // Total aportado = suma de aportes confirmados del lapso
   const totalAportado = misAportes.reduce((s, a) => s + FROM_DB(a.monto), 0);
 
-  const totalFondo = (allMiembros || [])
-    .filter((m) => !m.is_admin && m.activo)
-    .reduce((s, m) => s + FROM_DB(m.saldo), 0);
-
-  const totalGanancias = (ganancias || []).reduce((s, g) => s + FROM_DB(g.monto), 0);
+  // Ganancia estimada: (ganancias del ciclo / total de bloques de $100.000) x mis bloques
+  // Solo cuentan los socios que participan del ciclo actual
+  const totalBloques = (allMiembros || [])
+    .filter((m) => !m.is_admin && m.activo && enCicloActual(m))
+    .reduce((s, m) => s + bloquesDe(FROM_DB(m.saldo)), 0);
+  const totalGanancias = (ganancias || []).filter((g) => enCiclo(g.fecha, CICLO_ACTUAL)).reduce((s, g) => s + FROM_DB(g.monto), 0);
   const saldo = FROM_DB(miembro?.saldo || 0);
-  const proporcion = totalFondo > 0 ? saldo / totalFondo : 0;
-  const gananciaEst = Math.round(proporcion * totalGanancias);
+  const valorBloque = totalBloques > 0 ? totalGanancias / totalBloques : 0;
+  const gananciaEst = esNuevoLapso ? 0 : Math.round(bloquesDe(saldo) * valorBloque);
 
   return (
     <>
+      {esNuevoLapso && (
+        <div className="al info">
+          🎉 ¡Bienvenido al lapso <strong>{nombreCiclo(cicloU)}</strong>! Arranca el 1 de diciembre de {cicloU}. Ya puedes subir tu aporte de <strong>{mesesU[0]}</strong>.
+        </div>
+      )}
       {!pagadoMes && !pendiente && (
         <div className="al warn">
           ⚠️ No has registrado tu aporte de <strong>{mes}</strong>. Ve a "Mis Aportes".
@@ -851,12 +904,36 @@ function MemberDash({ user, config }) {
         </div>
       )}
 
+      {ultimaLiq && (
+        <div className="card" style={{ borderTop: '3px solid var(--gold)' }}>
+          <div className="ct">🔒 Liquidación ciclo {ultimaLiq.ciclos?.nombre?.replace('-', '–')}</div>
+          <div className="cs">Cierre del {ultimaLiq.ciclos?.fecha_cierre}</div>
+          <div className="tw" style={{ marginTop: 12 }}>
+            <table>
+              <tbody>
+                <tr><td>Saldo al cierre</td><td style={{ textAlign: 'right', fontWeight: 600 }}>{COP(ultimaLiq.saldo_final)}</td></tr>
+                <tr><td>Ganancia ({ultimaLiq.bloques} bloques de $100.000)</td><td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--green2)' }}>+ {COP(ultimaLiq.ganancia)}</td></tr>
+                {ultimaLiq.deuda_prestamo > 0 && (
+                  <tr><td>Descuento préstamo pendiente</td><td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--red2)' }}>− {COP(ultimaLiq.deuda_prestamo)}</td></tr>
+                )}
+                <tr><td style={{ fontWeight: 700 }}>Total</td><td style={{ textAlign: 'right', fontWeight: 700 }}>{COP(ultimaLiq.total)}</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div className={`al ${ultimaLiq.decision === 'continuar' ? 'info' : 'ok'}`} style={{ marginTop: 12, marginBottom: 0 }}>
+            {ultimaLiq.decision === 'continuar'
+              ? <>💼 Tu total de <strong>{COP(ultimaLiq.saldo_nuevo_ciclo)}</strong> sigue en el fondo y continúa acumulando en el nuevo ciclo.</>
+              : <>💵 Se te entregan <strong>{COP(ultimaLiq.monto_entregar)}</strong>. Tu saldo arranca en cero en el nuevo ciclo.</>}
+          </div>
+        </div>
+      )}
+
       <div className="bh">
         <div className="bh-lbl">Tu Saldo en el Fondo</div>
         <div className="bh-amt">{COP(saldo)}</div>
         <div className="bh-meta">
           <div className="bh-mi">
-            <label>Total aportado</label>
+            <label>Aportado este ciclo</label>
             <span>{COP(totalAportado)}</span>
           </div>
           <div className="bh-mi">
@@ -934,27 +1011,37 @@ function AdminDash({ config, setTab, showToast }) {
   const { data: inversiones } = useQuery(() => api.getInversiones(), []);
   const { data: ganancias } = useQuery(() => api.getGanancias(), []);
 
-  const activos = (miembros || []).filter((m) => !m.is_admin && m.activo);
+  const activosTodos = (miembros || []).filter((m) => !m.is_admin && m.activo);
+  // Socios del lapso que está corriendo hoy
+  const activos = activosTodos.filter(enCicloActual);
+  // Inscritos al próximo lapso (aún no empieza)
+  const inscritosProx = activosTodos.filter((m) => !enCicloActual(m));
   const mes = mesActual();
   const pagadosMes = new Set(
     (aportes || []).filter((a) => a.mes === mes && a.estado === 'confirmado').map((a) => a.miembro_id)
   ).size;
   const pendientesConf = (aportes || []).filter((a) => a.estado === 'pendiente').length;
-  const totalSaldos = activos.reduce((s, m) => s + FROM_DB(m.saldo), 0);
+  const totalSaldos = activosTodos.reduce((s, m) => s + FROM_DB(m.saldo), 0);
   const totalInv = (inversiones || []).filter((i) => i.estado === 'activo').reduce((s, i) => s + FROM_DB(i.monto), 0);
   const totalPrest = (prestamos || []).filter((p) => p.estado === 'activo').reduce((s, p) => s + FROM_DB(p.monto), 0);
-  const totalGanancias = (ganancias || []).reduce((s, g) => s + FROM_DB(g.monto), 0);
+  const totalGanancias = (ganancias || []).filter((g) => enCiclo(g.fecha, CICLO_ACTUAL)).reduce((s, g) => s + FROM_DB(g.monto), 0);
 
   return (
     <>
       <div className="ph">
         <h2>Panel General</h2>
-        <p>{mes} · {activos.length} socios activos</p>
+        <p>{mes} · Lapso {nombreCiclo(CICLO_ACTUAL)} · {activos.length} socios activos</p>
       </div>
 
       {pendientesConf > 0 && (
         <div className="al warn" style={{ cursor: 'pointer' }} onClick={() => setTab('aportes')}>
           ⚠️ <strong>{pendientesConf} aporte(s)</strong> esperan confirmación → <u>ir a Aportes</u>
+        </div>
+      )}
+
+      {inscritosProx.length > 0 && (
+        <div className="al info" style={{ cursor: 'pointer' }} onClick={() => setTab('miembros')}>
+          🆕 <strong>{inscritosProx.length} socio(s) nuevos</strong> inscritos al lapso {nombreCiclo(CICLO_ACTUAL + 1)} (arranca el 1 de diciembre) → <u>ver Miembros</u>
         </div>
       )}
 
@@ -1024,11 +1111,20 @@ function MisAportes({ user, config, showToast }) {
     return () => { revokeIfBlob(previewRef.current); };
   }, []); // eslint-disable-line
 
-  const mes = mesActual();
-  const idxActual = idxMesActual();
+  // Lapso del socio (un inscrito al próximo lapso ve y paga los meses de ese lapso)
+  const cicloU = cicloDe(user);
+  const mesesU = mesesDelCiclo(cicloU);
+  const mes = cicloU > CICLO_ACTUAL ? mesesU[0] : mesActual();
+  const ciclosVer = cicloU > CICLO_ACTUAL
+    ? [cicloU]
+    : CICLOS_DISPONIBLES.filter((c) => c >= cicloIngresoDe(user));
+  const [verCiclo, setVerCiclo] = useState(cicloU);
+  const mesesVer = mesesDelCiclo(verCiclo);
+  // Ciclos anteriores: todos los meses ya pasaron. Lapso que aún no arranca: diciembre es el "actual"
+  const idxActual = verCiclo === CICLO_ACTUAL ? idxMesActual() : verCiclo > CICLO_ACTUAL ? 0 : 12;
 
   // Meses disponibles: los que no tienen aporte O que estan rechazados (re-subir)
-  const mesesDisponibles = MESES_FONDO.filter(
+  const mesesDisponibles = mesesU.filter(
     (m) => !(aportes || []).some((a) => a.mes === m && a.estado !== 'rechazado')
   );
 
@@ -1239,9 +1335,17 @@ function MisAportes({ user, config, showToast }) {
 
       {/* Calendario de estado por mes */}
       <div className="card">
-        <div className="ct">Estado del Fondo 2025–2026</div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          <div className="ct">Estado del Fondo {nombreCiclo(verCiclo)}</div>
+          {ciclosVer.length > 1 && (
+            <select value={verCiclo} onChange={(e) => setVerCiclo(parseInt(e.target.value))}
+              style={{ padding: '6px 10px', background: 'var(--surface2)', border: '1.5px solid var(--border)', borderRadius: 'var(--rs)', color: 'var(--text)', fontSize: 13 }}>
+              {ciclosVer.map((c) => <option key={c} value={c}>Ciclo {nombreCiclo(c)}</option>)}
+            </select>
+          )}
+        </div>
         <div className="mgrid">
-          {MESES_FONDO.map((m, i) => {
+          {mesesVer.map((m, i) => {
             const a = mejorAporte((aportes || []).filter((ap) => ap.mes === m));
             const esFuturo = i > idxActual;
             const esActual = i === idxActual;
@@ -1340,10 +1444,12 @@ function AdminAportes({ config, showToast, setLight }) {
     const m = await api.getMiembroByCedula(cedula.trim());
     if (!m) { showToast('Miembro no encontrado.', 'err'); return; }
 
-    const mesLista = MESES_FONDO.map((mes, i) => `${i + 1}. ${mes}`).join('\n');
+    // Meses del lapso del socio (un inscrito al próximo lapso ve los meses de ese lapso)
+    const mesesM = mesesDelCiclo(cicloDe(m));
+    const mesLista = mesesM.map((mes, i) => `${i + 1}. ${mes}`).join('\n');
     const mesIdx = window.prompt(`Selecciona el mes:\n${mesLista}\n\nEscribe el número:`);
     if (!mesIdx) return;
-    const mesSeleccionado = MESES_FONDO[parseInt(mesIdx) - 1];
+    const mesSeleccionado = mesesM[parseInt(mesIdx) - 1];
     if (!mesSeleccionado) { showToast('Número de mes inválido.', 'err'); return; }
 
     const montoDefault = m.monto_mensual || config.monto_mensual;
@@ -1855,7 +1961,9 @@ function Inversiones({ user, showToast }) {
    GANANCIAS
 ───────────────────────────────────────────────────────────── */
 function Ganancias({ user, showToast }) {
-  const { data: ganancias, refetch } = useQuery(() => api.getGanancias(), []);
+  const { data: gananciasTodas, refetch } = useQuery(() => api.getGanancias(), []);
+  const [verCiclo, setVerCiclo] = useState(CICLO_ACTUAL);
+  const ganancias = (gananciasTodas || []).filter((g) => enCiclo(g.fecha, verCiclo));
   const [showForm, setShowForm] = useState(false);
   const [abonoId, setAbonoId] = useState(null);
   const [abonoMonto, setAbonoMonto] = useState('');
@@ -1870,11 +1978,12 @@ function Ganancias({ user, showToast }) {
     return acc;
   }, {});
 
-  const idxActual = idxMesActual();
+  const mesesGan = mesesDelCiclo(verCiclo);
+  const idxActual = verCiclo === CICLO_ACTUAL ? idxMesActual() : 11;
   const startIdx = Math.max(0, idxActual - 5);
-  const chartMeses = MESES_FONDO.slice(startIdx, idxActual + 1).map((m) => ({
-    label: MESES_ABR[MESES_FONDO.indexOf(m)],
-    total: (ganancias || []).filter((g) => g.fecha && g.mes === m).reduce((s, g) => s + FROM_DB(g.monto), 0),
+  const chartMeses = mesesGan.slice(startIdx, idxActual + 1).map((m, k) => ({
+    label: MESES_ABR[startIdx + k],
+    total: (ganancias || []).filter((g) => (g.fecha || '').slice(0, 7) === ymDeMes(m)).reduce((s, g) => s + FROM_DB(g.monto), 0),
   }));
   const maxC = Math.max(...chartMeses.map((m) => m.total), 1);
 
@@ -1937,7 +2046,15 @@ function Ganancias({ user, showToast }) {
 
   return (
     <>
-      <div className="ph"><h2>Ganancias</h2><p>Rendimientos, intereses y otros ingresos del fondo</p></div>
+      <div className="ph"><h2>Ganancias</h2><p>Rendimientos, intereses y otros ingresos del fondo · Ciclo {nombreCiclo(verCiclo)}</p></div>
+      {CICLOS_DISPONIBLES.length > 1 && (
+        <div style={{ marginBottom: 16 }}>
+          <select value={verCiclo} onChange={(e) => setVerCiclo(parseInt(e.target.value))}
+            style={{ padding: '8px 12px', background: 'var(--surface2)', border: '1.5px solid var(--border)', borderRadius: 'var(--rs)', color: 'var(--text)', fontSize: 13 }}>
+            {CICLOS_DISPONIBLES.map((c) => <option key={c} value={c}>Ciclo {nombreCiclo(c)}</option>)}
+          </select>
+        </div>
+      )}
       <div className="sg">
         <div className="sb g"><div className="si">💰</div><div className="sl">Total ganancias</div><div className="sv">{COP(total)}</div></div>
         <div className="sb go"><div className="si">📈</div><div className="sl">Rendimientos</div><div className="sv">{COP(porTipo.rendimiento || 0)}</div></div>
@@ -2057,7 +2174,7 @@ function Ganancias({ user, showToast }) {
       </div>
       {!user.is_admin && (
         <div className="al info" style={{ marginTop: 4 }}>
-          Las ganancias se distribuyen proporcionalmente al saldo de cada socio. Tu parte estimada la ves en tu dashboard.
+          Las ganancias del ciclo se reparten por cada $100.000 completos de saldo. Tu parte estimada la ves en "Mi Saldo".
         </div>
       )}
     </>
@@ -2071,13 +2188,19 @@ function Ganancias({ user, showToast }) {
 function AdminMiembros({ showToast }) {
   const { data: miembros, refetch } = useQuery(() => api.getMiembros(), []);
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ nombre: '', cedula: '', saldo: '0', monto_mensual: '0' });
+  const formVacio = { nombre: '', cedula: '', saldo: '0', monto_mensual: '0', ciclo_ingreso: String(CICLO_INSCRIPCION) };
+  const [form, setForm] = useState(formVacio);
   const [saving, setSaving] = useState(false);
+  const [filtroLapso, setFiltroLapso] = useState('todos');
+
+  // Lapsos que se pueden asignar: el que corre y el siguiente
+  const lapsosAsignables = [CICLO_ACTUAL, CICLO_ACTUAL + 1];
 
   const crear = async () => {
     if (!form.nombre || !form.cedula) { showToast('Nombre y cédula obligatorios.', 'err'); return; }
     setSaving(true);
     try {
+      const ciclo = parseInt(form.ciclo_ingreso) || CICLO_INSCRIPCION;
       await api.createMiembro({
         nombre: form.nombre.trim(),
         cedula: form.cedula.trim(),
@@ -2086,13 +2209,14 @@ function AdminMiembros({ showToast }) {
         activo: true,
         fecha_ingreso: today(),
         is_admin: false,
+        ciclo_ingreso: ciclo,
       });
       setShowForm(false);
-      setForm({ nombre: '', cedula: '', saldo: '0', monto_mensual: '0' });
-      showToast('Miembro creado.');
+      setForm(formVacio);
+      showToast(`Miembro creado en el lapso ${nombreCiclo(ciclo)}.`);
       refetch();
     } catch (e) {
-      showToast(e.message === 'duplicate key' ? 'Cédula ya registrada.' : e.message, 'err');
+      showToast(/duplicate key/i.test(e.message) ? 'Cédula ya registrada.' : e.message, 'err');
     } finally { setSaving(false); }
   };
 
@@ -2112,14 +2236,43 @@ function AdminMiembros({ showToast }) {
     } catch (e) { showToast(e.message, 'err'); }
   };
 
-  const activos = (miembros || []).filter((m) => !m.is_admin && m.activo).length;
-  const inactivos = (miembros || []).filter((m) => !m.is_admin && !m.activo).length;
+  const cambiarLapso = async (m, val) => {
+    const ciclo = parseInt(val);
+    if (!window.confirm(`¿Pasar a ${m.nombre} al lapso ${nombreCiclo(ciclo)}?`)) { refetch(); return; }
+    try {
+      await api.updateMiembro(m.id, { ciclo_ingreso: ciclo });
+      showToast('Lapso actualizado.');
+      refetch();
+    } catch (e) { showToast(e.message, 'err'); }
+  };
+
+  const socios = (miembros || []).filter((m) => !m.is_admin);
+  const activos = socios.filter((m) => m.activo).length;
+  const inactivos = socios.filter((m) => !m.activo).length;
+  const nuevosProx = socios.filter((m) => m.activo && cicloIngresoDe(m) > CICLO_ACTUAL).length;
+  const visibles = filtroLapso === 'todos' ? socios : socios.filter((m) => String(cicloIngresoDe(m)) === filtroLapso);
+  const lapsosExistentes = [...new Set(socios.map(cicloIngresoDe))].sort();
 
   return (
     <>
-      <div className="ph"><h2>Miembros</h2><p>{activos} activos · {inactivos} inactivos</p></div>
-      <div style={{ marginBottom: 16 }}>
+      <div className="ph">
+        <h2>Miembros</h2>
+        <p>{activos} activos · {inactivos} inactivos{nuevosProx > 0 ? ` · ${nuevosProx} nuevos para ${nombreCiclo(CICLO_ACTUAL + 1)}` : ''}</p>
+      </div>
+      {CICLO_INSCRIPCION > CICLO_ACTUAL && (
+        <div className="al info">
+          🆕 Los socios que agregues ahora quedan inscritos al lapso <strong>{nombreCiclo(CICLO_INSCRIPCION)}</strong>: no entran en la liquidación {nombreCiclo(CICLO_ACTUAL)} y ya pueden subir su aporte de Diciembre {CICLO_INSCRIPCION}.
+        </div>
+      )}
+      <div style={{ marginBottom: 16, display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
         <button className="btn primary" onClick={() => setShowForm((v) => !v)}>+ Agregar Miembro</button>
+        {lapsosExistentes.length > 1 && (
+          <select value={filtroLapso} onChange={(e) => setFiltroLapso(e.target.value)}
+            style={{ padding: '8px 12px', background: 'var(--surface2)', border: '1.5px solid var(--border)', borderRadius: 'var(--rs)', color: 'var(--text)', fontSize: 13 }}>
+            <option value="todos">Todos los lapsos</option>
+            {lapsosExistentes.map((c) => <option key={c} value={String(c)}>Ingresaron en {nombreCiclo(c)}</option>)}
+          </select>
+        )}
       </div>
       {showForm && (
         <div className="card" style={{ borderTop: '3px solid var(--accent)' }}>
@@ -2129,10 +2282,20 @@ function AdminMiembros({ showToast }) {
             <div className="field"><label>Cédula</label><input value={form.cedula} onChange={(e) => setForm({ ...form, cedula: e.target.value })} /></div>
             <div className="field"><label>Saldo Inicial (COP)</label><input type="number" value={form.saldo} onChange={(e) => setForm({ ...form, saldo: e.target.value })} /></div>
             <div className="field"><label>Aporte Mensual (COP)</label><input type="number" value={form.monto_mensual} onChange={(e) => setForm({ ...form, monto_mensual: e.target.value })} /></div>
+            <div className="field ff">
+              <label>Lapso de ingreso</label>
+              <select value={form.ciclo_ingreso} onChange={(e) => setForm({ ...form, ciclo_ingreso: e.target.value })}>
+                {lapsosAsignables.map((c) => (
+                  <option key={c} value={String(c)}>
+                    {nombreCiclo(c)}{c === CICLO_ACTUAL ? ' (en curso)' : ' (arranca el 1 de diciembre)'}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
           <div style={{ display: 'flex', gap: 10, marginTop: 14 }}>
             <button className="btn primary" onClick={crear} disabled={saving}>{saving ? 'Creando…' : 'Crear'}</button>
-            <button className="btn ghost" onClick={() => setShowForm(false)}>Cancelar</button>
+            <button className="btn ghost" onClick={() => { setShowForm(false); setForm(formVacio); }}>Cancelar</button>
           </div>
         </div>
       )}
@@ -2140,24 +2303,34 @@ function AdminMiembros({ showToast }) {
         <div className="tw">
           <table>
             <thead>
-              <tr><th>Miembro</th><th>Cédula</th><th>Aporte/mes</th><th>Saldo</th><th>Ingresó</th><th>Estado</th><th></th></tr>
+              <tr><th>Miembro</th><th>Cédula</th><th>Aporte/mes</th><th>Saldo</th><th>Lapso</th><th>Ingresó</th><th>Estado</th><th></th></tr>
             </thead>
             <tbody>
-              {(miembros || []).filter((m) => !m.is_admin).map((m) => (
-                <tr key={m.id}>
-                  <td style={{ fontWeight: 600 }}>{m.nombre}</td>
-                  <td style={{ fontFamily: 'monospace', fontSize: 13 }}>{m.cedula}</td>
-                  <td style={{ fontSize: 13, color: 'var(--text2)' }}>{COP(m.monto_mensual || 0)}</td>
-                  <td>
-                    <input type="number" defaultValue={FROM_DB(m.saldo)}
-                      onBlur={(e) => editSaldo(m, e.target.value)}
-                      style={{ width: 130, padding: '6px 10px', background: 'var(--surface2)', border: '1.5px solid var(--border)', borderRadius: 'var(--rs)', color: 'var(--text)', fontSize: 13, fontFamily: 'Outfit,sans-serif' }} />
-                  </td>
-                  <td style={{ fontSize: 12, color: 'var(--text3)' }}>{m.fecha_ingreso}</td>
-                  <td><span className={`badge ${m.activo ? 'bg' : 'br'}`}>{m.activo ? 'Activo' : 'Inactivo'}</span></td>
-                  <td><button className={`btn sm ${m.activo ? 'danger' : 'success'}`} onClick={() => toggle(m)}>{m.activo ? 'Desactivar' : 'Activar'}</button></td>
-                </tr>
-              ))}
+              {visibles.map((m) => {
+                const lapso = cicloIngresoDe(m);
+                const opciones = [...new Set([lapso, ...lapsosAsignables])].sort();
+                return (
+                  <tr key={m.id}>
+                    <td style={{ fontWeight: 600 }}>{m.nombre}</td>
+                    <td style={{ fontFamily: 'monospace', fontSize: 13 }}>{m.cedula}</td>
+                    <td style={{ fontSize: 13, color: 'var(--text2)' }}>{COP(m.monto_mensual || 0)}</td>
+                    <td>
+                      <input type="number" defaultValue={FROM_DB(m.saldo)}
+                        onBlur={(e) => editSaldo(m, e.target.value)}
+                        style={{ width: 130, padding: '6px 10px', background: 'var(--surface2)', border: '1.5px solid var(--border)', borderRadius: 'var(--rs)', color: 'var(--text)', fontSize: 13, fontFamily: 'Outfit,sans-serif' }} />
+                    </td>
+                    <td>
+                      <select key={`${m.id}-${lapso}`} defaultValue={String(lapso)} onChange={(e) => cambiarLapso(m, e.target.value)}
+                        style={{ padding: '6px 8px', background: 'var(--surface2)', border: `1.5px solid ${lapso > CICLO_ACTUAL ? 'var(--accent)' : 'var(--border)'}`, borderRadius: 'var(--rs)', color: 'var(--text)', fontSize: 12 }}>
+                        {opciones.map((c) => <option key={c} value={String(c)}>{nombreCiclo(c)}</option>)}
+                      </select>
+                    </td>
+                    <td style={{ fontSize: 12, color: 'var(--text3)' }}>{m.fecha_ingreso}</td>
+                    <td><span className={`badge ${m.activo ? 'bg' : 'br'}`}>{m.activo ? 'Activo' : 'Inactivo'}</span></td>
+                    <td><button className={`btn sm ${m.activo ? 'danger' : 'success'}`} onClick={() => toggle(m)}>{m.activo ? 'Desactivar' : 'Activar'}</button></td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -3110,6 +3283,251 @@ function Merch({ user, showToast, setLight }) {
           </div>
         ))}
       </div>
+    </>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────
+   ADMIN — CIERRE DE CICLO
+   Reglas del fondo:
+   • Ganancias del ciclo se reparten por cada bloque COMPLETO de $100.000 de saldo.
+   • La ganancia se calcula sobre el saldo; luego se descuenta lo que se deba de préstamos.
+   • Por defecto se liquida (se entrega todo y el saldo vuelve a 0). El admin puede
+     autorizar que un socio continúe: su total queda como saldo del nuevo ciclo.
+   • Los socios inscritos a un lapso posterior NO entran en esta liquidación.
+───────────────────────────────────────────────────────────── */
+function AdminCierreCiclo({ showToast }) {
+  const hoy = new Date();
+  // En diciembre se cierra el ciclo que acaba de terminar; antes, el ciclo en curso
+  const cicloSugerido = hoy.getMonth() === 11 ? CICLO_ACTUAL - 1 : CICLO_ACTUAL;
+  const { data: ciclos, refetch: refetchCiclos } = useQuery(() => api.getCiclos(), []);
+  const { data: miembros, refetch: refetchMiembros } = useQuery(() => api.getMiembros(), []);
+  const { data: ganancias } = useQuery(() => api.getGanancias(), []);
+  const { data: prestamos } = useQuery(() => api.getPrestamos(), []);
+  const { data: aportes } = useQuery(() => api.getAportes(), []);
+  const [continuan, setContinuan] = useState({});
+  const [cerrando, setCerrando] = useState(false);
+  const [verLiq, setVerLiq] = useState(null);
+  const { data: liqVista } = useQuery(
+    () => (verLiq ? api.getLiquidaciones({ ciclo_id: verLiq }) : Promise.resolve([])),
+    [verLiq]
+  );
+
+  const cerrados = new Set((ciclos || []).map((c) => c.anio_inicio));
+  const ai = cicloSugerido;
+  const yaCerrado = cerrados.has(ai);
+  const mesesCiclo = mesesDelCiclo(ai);
+  const mesesSiguiente = mesesDelCiclo(ai + 1);
+
+  // Solo los socios que ingresaron en este lapso o antes
+  const activos = (miembros || []).filter((m) => !m.is_admin && m.activo && cicloIngresoDe(m) <= ai);
+  const nuevosExcluidos = (miembros || []).filter((m) => !m.is_admin && m.activo && cicloIngresoDe(m) > ai).length;
+  const pendientesCiclo = (aportes || []).filter((a) => a.estado === 'pendiente' && mesesCiclo.includes(a.mes));
+  const solicitudesPrestamo = (prestamos || []).filter((p) => p.estado === 'pendiente');
+
+  // Aportes del NUEVO ciclo ya confirmados (ej. diciembre) no se liquidan: se separan del saldo
+  const aporteNuevoCiclo = (mid) =>
+    (aportes || [])
+      .filter((a) => a.miembro_id === mid && a.estado === 'confirmado' && mesesSiguiente.includes(a.mes))
+      .reduce((s, a) => s + FROM_DB(a.monto), 0);
+
+  const totalGanancias = (ganancias || []).filter((g) => enCiclo(g.fecha, ai)).reduce((s, g) => s + FROM_DB(g.monto), 0);
+
+  const base = activos.map((m) => {
+    const saldoActual = FROM_DB(m.saldo);
+    const nuevo = aporteNuevoCiclo(m.id);
+    const saldoCierre = saldoActual - nuevo;
+    const prests = (prestamos || []).filter((p) => p.miembro_id === m.id && p.estado === 'activo');
+    const deuda = prests.reduce((s, p) => s + deudaPrestamo(p), 0);
+    return { m, saldoActual, nuevo, saldoCierre, bloques: bloquesDe(saldoCierre), prests, deuda };
+  });
+  const totalBloques = base.reduce((s, r) => s + r.bloques, 0);
+  const valorBloque = totalBloques > 0 ? totalGanancias / totalBloques : 0;
+
+  const filas = base.map((r) => {
+    const ganancia = Math.round(r.bloques * valorBloque);
+    const total = r.saldoCierre + ganancia - r.deuda;
+    const decision = continuan[r.m.id] ? 'continuar' : 'liquidar';
+    return {
+      ...r,
+      ganancia,
+      total,
+      decision,
+      entregar: decision === 'liquidar' ? Math.max(total, 0) : 0,
+      saldoNuevo: (decision === 'continuar' ? total : 0) + r.nuevo,
+    };
+  }).sort((a, b) => a.m.nombre.localeCompare(b.m.nombre));
+
+  const negativos = filas.filter((f) => f.total < 0);
+  const totalEntregar = filas.reduce((s, f) => s + f.entregar, 0);
+  const totalSigue = filas.filter((f) => f.decision === 'continuar').reduce((s, f) => s + f.total, 0);
+  const nContinuan = filas.filter((f) => f.decision === 'continuar').length;
+  const bloqueado = yaCerrado || pendientesCiclo.length > 0 || negativos.length > 0 || cerrando || !miembros;
+
+  const cerrar = async () => {
+    if (bloqueado) return;
+    const msg =
+      `¿Cerrar el ciclo ${nombreCiclo(ai)}?\n\n` +
+      `• Ganancias a repartir: ${COP(totalGanancias)} (${COP(Math.round(valorBloque))} por cada $100.000)\n` +
+      `• Socios que se liquidan: ${filas.length - nContinuan} — total a entregar ${COP(totalEntregar)}\n` +
+      `• Socios que continúan: ${nContinuan} — ${COP(totalSigue)} siguen en el fondo\n\n` +
+      `Esta acción NO se puede deshacer.`;
+    if (!window.confirm(msg)) return;
+    setCerrando(true);
+    try {
+      await api.cerrarCiclo({
+        p_anio: ai,
+        p_total_ganancias: totalGanancias,
+        p_total_bloques: totalBloques,
+        p_valor_bloque: Number(valorBloque.toFixed(4)),
+        p_filas: filas.map((f) => ({
+          miembro_id: f.m.id,
+          saldo_actual: f.saldoActual,
+          saldo_final: f.saldoCierre,
+          bloques: f.bloques,
+          ganancia: f.ganancia,
+          deuda_prestamo: f.deuda,
+          total: f.total,
+          decision: f.decision,
+          monto_entregar: f.entregar,
+          saldo_nuevo_ciclo: f.saldoNuevo,
+        })),
+        p_prestamos: filas.flatMap((f) => f.prests.map((p) => ({
+          id: p.id,
+          interes: interesRestante(p),
+          descripcion: `Interés préstamo saldado en cierre ${nombreCiclo(ai)} — ${f.m.nombre}`,
+        }))),
+      });
+      showToast(`✅ Ciclo ${nombreCiclo(ai)} cerrado.`);
+      setContinuan({});
+      refetchCiclos();
+      refetchMiembros();
+    } catch (e) {
+      showToast('No se cerró el ciclo: ' + e.message, 'err');
+    } finally { setCerrando(false); }
+  };
+
+  const descargarCSV = (rows, nombre) => {
+    const enc = ['Socio', 'Cedula', 'Saldo cierre', 'Bloques', 'Ganancia', 'Descuento prestamo', 'Total', 'Decision', 'Entregar', 'Saldo nuevo ciclo'];
+    const lineas = rows.map((r) => [r.miembros?.nombre, r.miembros?.cedula, r.saldo_final, r.bloques, r.ganancia, r.deuda_prestamo, r.total, r.decision, r.monto_entregar, r.saldo_nuevo_ciclo]
+      .map((v) => `"${String(v ?? '').replace(/"/g, '""')}"`).join(','));
+    const blob = new Blob(['﻿' + [enc.join(','), ...lineas].join('\n')], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `liquidacion_${nombre}.csv`; a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+
+  return (
+    <>
+      <div className="ph">
+        <h2>Cierre de Ciclo</h2>
+        <p>Ciclo {nombreCiclo(ai)} · Diciembre {ai} a Noviembre {ai + 1}</p>
+      </div>
+
+      {yaCerrado ? (
+        <div className="al ok">✅ El ciclo {nombreCiclo(ai)} ya está cerrado. Puedes ver su liquidación abajo.</div>
+      ) : (
+        <>
+          {pendientesCiclo.length > 0 && (
+            <div className="al err">⛔ Hay <strong>{pendientesCiclo.length} aporte(s) pendientes</strong> de este ciclo. Confírmalos o recházalos en "Aportes" antes de cerrar.</div>
+          )}
+          {negativos.length > 0 && (
+            <div className="al err">⛔ {negativos.map((f) => f.m.nombre).join(', ')}: la deuda del préstamo es mayor que su saldo más ganancia. Debe abonar antes del cierre.</div>
+          )}
+          {solicitudesPrestamo.length > 0 && (
+            <div className="al warn">⚠️ Hay {solicitudesPrestamo.length} solicitud(es) de préstamo sin responder.</div>
+          )}
+          {nuevosExcluidos > 0 && (
+            <div className="al info">🆕 {nuevosExcluidos} socio(s) inscritos al lapso {nombreCiclo(ai + 1)} no entran en esta liquidación.</div>
+          )}
+          {hoy < new Date(ai + 1, 10, 30) && (
+            <div className="al info">ℹ️ Este ciclo termina el 30 de noviembre de {ai + 1}. Esta es una vista previa: los números pueden cambiar si entran más aportes o ganancias.</div>
+          )}
+
+          <div className="sg">
+            <div className="sb g"><div className="si">💰</div><div className="sl">Ganancias del ciclo</div><div className="sv" style={{ fontSize: 16 }}>{COP(totalGanancias)}</div></div>
+            <div className="sb go"><div className="si">🧱</div><div className="sl">Por cada $100.000</div><div className="sv" style={{ fontSize: 16 }}>{COP(Math.round(valorBloque))}</div></div>
+            <div className="sb a"><div className="si">💵</div><div className="sl">Total a entregar</div><div className="sv" style={{ fontSize: 16 }}>{COP(totalEntregar)}</div></div>
+            <div className="sb p"><div className="si">🔁</div><div className="sl">Continúan ({nContinuan})</div><div className="sv" style={{ fontSize: 16 }}>{COP(totalSigue)}</div></div>
+          </div>
+
+          <div className="card">
+            <div className="ct">Liquidación por socio</div>
+            <div className="cs">Marca "Continúa" solo para los socios que autorizaste a dejar su saldo acumulando.</div>
+            <div className="tw" style={{ marginTop: 12 }}>
+              <table>
+                <thead>
+                  <tr><th>Socio</th><th>Saldo</th><th>Bloques</th><th>Ganancia</th><th>Préstamo</th><th>Total</th><th>Continúa</th></tr>
+                </thead>
+                <tbody>
+                  {filas.map((f) => (
+                    <tr key={f.m.id} style={f.total < 0 ? { background: 'rgba(239,68,68,.08)' } : undefined}>
+                      <td style={{ fontWeight: 600 }}>
+                        {f.m.nombre}
+                        {f.nuevo > 0 && <div style={{ fontSize: 11, color: 'var(--text3)' }}>+ {COP(f.nuevo)} ya aportado al nuevo ciclo</div>}
+                      </td>
+                      <td>{COP(f.saldoCierre)}</td>
+                      <td style={{ textAlign: 'center' }}>{f.bloques}</td>
+                      <td style={{ color: 'var(--green2)' }}>{COP(f.ganancia)}</td>
+                      <td style={{ color: f.deuda > 0 ? 'var(--red2)' : 'var(--text3)' }}>{f.deuda > 0 ? '− ' + COP(f.deuda) : '—'}</td>
+                      <td style={{ fontWeight: 700 }}>{COP(f.total)}</td>
+                      <td style={{ textAlign: 'center' }}>
+                        <input type="checkbox" checked={!!continuan[f.m.id]}
+                          onChange={(e) => setContinuan({ ...continuan, [f.m.id]: e.target.checked })}
+                          style={{ width: 18, height: 18, cursor: 'pointer' }} />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <button className="btn danger" style={{ marginTop: 16 }} onClick={cerrar} disabled={bloqueado}>
+              {cerrando ? 'Cerrando…' : `🔒 Cerrar ciclo ${nombreCiclo(ai)}`}
+            </button>
+          </div>
+        </>
+      )}
+
+      {(ciclos || []).length > 0 && (
+        <div className="card">
+          <div className="ct">Ciclos cerrados</div>
+          {(ciclos || []).map((c) => (
+            <div className="mr" key={c.id}>
+              <div className="mi2">
+                <div className="nm">Ciclo {nombreCiclo(c.anio_inicio)}</div>
+                <div className="mt">Cerrado el {c.fecha_cierre} · Ganancias {COP(c.total_ganancias)} · {COP(Math.round(c.valor_bloque))} por cada $100.000</div>
+              </div>
+              <button className="btn sm ghost" onClick={() => setVerLiq(verLiq === c.id ? null : c.id)}>{verLiq === c.id ? 'Ocultar' : 'Ver'}</button>
+            </div>
+          ))}
+          {verLiq && (liqVista || []).length > 0 && (
+            <>
+              <div className="tw" style={{ marginTop: 12 }}>
+                <table>
+                  <thead><tr><th>Socio</th><th>Saldo</th><th>Ganancia</th><th>Préstamo</th><th>Total</th><th>Decisión</th></tr></thead>
+                  <tbody>
+                    {[...liqVista].sort((a, b) => (a.miembros?.nombre || '').localeCompare(b.miembros?.nombre || '')).map((r) => (
+                      <tr key={r.id}>
+                        <td style={{ fontWeight: 600 }}>{r.miembros?.nombre}</td>
+                        <td>{COP(r.saldo_final)}</td>
+                        <td style={{ color: 'var(--green2)' }}>{COP(r.ganancia)}</td>
+                        <td>{r.deuda_prestamo > 0 ? '− ' + COP(r.deuda_prestamo) : '—'}</td>
+                        <td style={{ fontWeight: 700 }}>{COP(r.total)}</td>
+                        <td><span className={`badge ${r.decision === 'continuar' ? 'bb' : 'bg'}`}>{r.decision === 'continuar' ? 'Continúa' : `Entregar ${COP(r.monto_entregar)}`}</span></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <button className="btn sm ghost" style={{ marginTop: 12 }}
+                onClick={() => descargarCSV(liqVista, (ciclos || []).find((c) => c.id === verLiq)?.nombre || 'ciclo')}>
+                ⬇️ Descargar en Excel (CSV)
+              </button>
+            </>
+          )}
+        </div>
+      )}
     </>
   );
 }
