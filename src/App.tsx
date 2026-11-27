@@ -51,9 +51,21 @@ const enCicloActual = (m) => cicloIngresoDe(m) <= CICLO_ACTUAL;
 // Los 12 meses del ciclo actual, con su año correcto
 const MESES_FONDO = mesesDelCiclo(CICLO_ACTUAL);
 
-// Reparto de ganancias: por cada bloque COMPLETO de $100.000 de saldo
-const BLOQUE = 100000;
-const bloquesDe = (saldo) => Math.max(0, Math.floor((saldo || 0) / BLOQUE));
+// Reparto de ganancias POR CUPOS: cada 100.000 pesos de aporte MENSUAL = 1 cupo.
+// Ej: un socio que aporta 500.000 al mes tiene 5 cupos en todo el lapso.
+// Ganancia por cupo = ganancias del ciclo / total de cupos. Ganancia del socio = sus cupos x ganancia por cupo.
+// A cada socio se le entrega su total ahorrado + su ganancia (menos lo que deba de préstamos).
+const CUPO = 100000;
+// Socios que NO participan del reparto de ganancias (por cédula)
+const EXCLUIDOS_GANANCIAS = [
+  '1012424817', // Dana Serrano
+];
+// Cupos del socio según su aporte mensual (se redondea a medio cupo: 150.000 = 1,5 cupos)
+const cuposDe = (m) => {
+  if (!m || EXCLUIDOS_GANANCIAS.includes(String(m.cedula || '').trim())) return 0;
+  return Math.max(0, Math.round(((m.monto_mensual || 0) / CUPO) * 2) / 2);
+};
+const fmtCupos = (n) => String(n).replace('.', ',');
 // Deuda pendiente de un préstamo activo (cuotas que faltan, con su interés)
 const cuotaPrestamo = (p) => Math.round((FROM_DB(p.monto) * (1 + (p.interes / 100) * p.cuotas)) / p.cuotas);
 const deudaPrestamo = (p) => (p.cuotas - p.cuotas_pagadas) * cuotaPrestamo(p);
@@ -871,15 +883,16 @@ function MemberDash({ user, config }) {
   // Total aportado = suma de aportes confirmados del lapso
   const totalAportado = misAportes.reduce((s, a) => s + FROM_DB(a.monto), 0);
 
-  // Ganancia estimada: (ganancias del ciclo / total de bloques de $100.000) x mis bloques
-  // Solo cuentan los socios que participan del ciclo actual
+  // Ganancia estimada: (ganancias del ciclo / total de cupos) x mis cupos
+  // Cupos = aporte mensual / 100.000. Solo cuentan los socios que participan del ciclo actual
   const totalBloques = (allMiembros || [])
     .filter((m) => !m.is_admin && m.activo && enCicloActual(m))
-    .reduce((s, m) => s + bloquesDe(FROM_DB(m.saldo)), 0);
+    .reduce((s, m) => s + cuposDe(m), 0);
   const totalGanancias = (ganancias || []).filter((g) => enCiclo(g.fecha, CICLO_ACTUAL)).reduce((s, g) => s + FROM_DB(g.monto), 0);
   const saldo = FROM_DB(miembro?.saldo || 0);
   const valorBloque = totalBloques > 0 ? totalGanancias / totalBloques : 0;
-  const gananciaEst = esNuevoLapso ? 0 : Math.round(bloquesDe(saldo) * valorBloque);
+  const misCupos = esNuevoLapso ? 0 : cuposDe(miembro || user);
+  const gananciaEst = Math.round(misCupos * valorBloque);
 
   return (
     <>
@@ -912,7 +925,7 @@ function MemberDash({ user, config }) {
             <table>
               <tbody>
                 <tr><td>Saldo al cierre</td><td style={{ textAlign: 'right', fontWeight: 600 }}>{COP(ultimaLiq.saldo_final)}</td></tr>
-                <tr><td>Ganancia ({ultimaLiq.bloques} bloques de $100.000)</td><td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--green2)' }}>+ {COP(ultimaLiq.ganancia)}</td></tr>
+                <tr><td>Ganancia ({fmtCupos(Number(ultimaLiq.bloques))} cupos)</td><td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--green2)' }}>+ {COP(ultimaLiq.ganancia)}</td></tr>
                 {ultimaLiq.deuda_prestamo > 0 && (
                   <tr><td>Descuento préstamo pendiente</td><td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--red2)' }}>− {COP(ultimaLiq.deuda_prestamo)}</td></tr>
                 )}
@@ -941,7 +954,7 @@ function MemberDash({ user, config }) {
             <span>{misAportes.length}</span>
           </div>
           <div className="bh-mi">
-            <label>Parte de ganancias</label>
+            <label>Parte de ganancias ({fmtCupos(misCupos)} cupos)</label>
             <span>{COP(gananciaEst)}</span>
           </div>
           <div className="bh-mi">
@@ -3290,8 +3303,10 @@ function Merch({ user, showToast, setLight }) {
 /* ─────────────────────────────────────────────────────────────
    ADMIN — CIERRE DE CICLO
    Reglas del fondo:
-   • Ganancias del ciclo se reparten por cada bloque COMPLETO de $100.000 de saldo.
-   • La ganancia se calcula sobre el saldo; luego se descuenta lo que se deba de préstamos.
+   • Ganancias del ciclo se reparten POR CUPOS: cada 100.000 de aporte mensual = 1 cupo.
+     Ganancia por cupo = ganancias del ciclo / total de cupos; al socio: sus cupos x ganancia por cupo.
+   • Se entrega el saldo ahorrado + la ganancia; luego se descuenta lo que se deba de préstamos.
+   • Los socios en EXCLUIDOS_GANANCIAS reciben su ahorro pero no ganancia.
    • Por defecto se liquida (se entrega todo y el saldo vuelve a 0). El admin puede
      autorizar que un socio continúe: su total queda como saldo del nuevo ciclo.
    • Los socios inscritos a un lapso posterior NO entran en esta liquidación.
@@ -3339,7 +3354,7 @@ function AdminCierreCiclo({ showToast }) {
     const saldoCierre = saldoActual - nuevo;
     const prests = (prestamos || []).filter((p) => p.miembro_id === m.id && p.estado === 'activo');
     const deuda = prests.reduce((s, p) => s + deudaPrestamo(p), 0);
-    return { m, saldoActual, nuevo, saldoCierre, bloques: bloquesDe(saldoCierre), prests, deuda };
+    return { m, saldoActual, nuevo, saldoCierre, bloques: cuposDe(m), prests, deuda };
   });
   const totalBloques = base.reduce((s, r) => s + r.bloques, 0);
   const valorBloque = totalBloques > 0 ? totalGanancias / totalBloques : 0;
@@ -3368,7 +3383,7 @@ function AdminCierreCiclo({ showToast }) {
     if (bloqueado) return;
     const msg =
       `¿Cerrar el ciclo ${nombreCiclo(ai)}?\n\n` +
-      `• Ganancias a repartir: ${COP(totalGanancias)} (${COP(Math.round(valorBloque))} por cada $100.000)\n` +
+      `• Ganancias a repartir: ${COP(totalGanancias)} (${COP(Math.round(valorBloque))} por cupo · ${fmtCupos(totalBloques)} cupos)\n` +
       `• Socios que se liquidan: ${filas.length - nContinuan} — total a entregar ${COP(totalEntregar)}\n` +
       `• Socios que continúan: ${nContinuan} — ${COP(totalSigue)} siguen en el fondo\n\n` +
       `Esta acción NO se puede deshacer.`;
@@ -3408,7 +3423,7 @@ function AdminCierreCiclo({ showToast }) {
   };
 
   const descargarCSV = (rows, nombre) => {
-    const enc = ['Socio', 'Cedula', 'Saldo cierre', 'Bloques', 'Ganancia', 'Descuento prestamo', 'Total', 'Decision', 'Entregar', 'Saldo nuevo ciclo'];
+    const enc = ['Socio', 'Cedula', 'Saldo cierre', 'Cupos', 'Ganancia', 'Descuento prestamo', 'Total', 'Decision', 'Entregar', 'Saldo nuevo ciclo'];
     const lineas = rows.map((r) => [r.miembros?.nombre, r.miembros?.cedula, r.saldo_final, r.bloques, r.ganancia, r.deuda_prestamo, r.total, r.decision, r.monto_entregar, r.saldo_nuevo_ciclo]
       .map((v) => `"${String(v ?? '').replace(/"/g, '""')}"`).join(','));
     const blob = new Blob(['﻿' + [enc.join(','), ...lineas].join('\n')], { type: 'text/csv;charset=utf-8' });
@@ -3447,7 +3462,7 @@ function AdminCierreCiclo({ showToast }) {
 
           <div className="sg">
             <div className="sb g"><div className="si">💰</div><div className="sl">Ganancias del ciclo</div><div className="sv" style={{ fontSize: 16 }}>{COP(totalGanancias)}</div></div>
-            <div className="sb go"><div className="si">🧱</div><div className="sl">Por cada $100.000</div><div className="sv" style={{ fontSize: 16 }}>{COP(Math.round(valorBloque))}</div></div>
+            <div className="sb go"><div className="si">🧱</div><div className="sl">Por cupo ({fmtCupos(totalBloques)} cupos)</div><div className="sv" style={{ fontSize: 16 }}>{COP(Math.round(valorBloque))}</div></div>
             <div className="sb a"><div className="si">💵</div><div className="sl">Total a entregar</div><div className="sv" style={{ fontSize: 16 }}>{COP(totalEntregar)}</div></div>
             <div className="sb p"><div className="si">🔁</div><div className="sl">Continúan ({nContinuan})</div><div className="sv" style={{ fontSize: 16 }}>{COP(totalSigue)}</div></div>
           </div>
@@ -3458,7 +3473,7 @@ function AdminCierreCiclo({ showToast }) {
             <div className="tw" style={{ marginTop: 12 }}>
               <table>
                 <thead>
-                  <tr><th>Socio</th><th>Saldo</th><th>Bloques</th><th>Ganancia</th><th>Préstamo</th><th>Total</th><th>Continúa</th></tr>
+                  <tr><th>Socio</th><th>Saldo</th><th>Cupos</th><th>Ganancia</th><th>Préstamo</th><th>Total</th><th>Continúa</th></tr>
                 </thead>
                 <tbody>
                   {filas.map((f) => (
@@ -3468,7 +3483,7 @@ function AdminCierreCiclo({ showToast }) {
                         {f.nuevo > 0 && <div style={{ fontSize: 11, color: 'var(--text3)' }}>+ {COP(f.nuevo)} ya aportado al nuevo ciclo</div>}
                       </td>
                       <td>{COP(f.saldoCierre)}</td>
-                      <td style={{ textAlign: 'center' }}>{f.bloques}</td>
+                      <td style={{ textAlign: 'center' }}>{fmtCupos(f.bloques)}</td>
                       <td style={{ color: 'var(--green2)' }}>{COP(f.ganancia)}</td>
                       <td style={{ color: f.deuda > 0 ? 'var(--red2)' : 'var(--text3)' }}>{f.deuda > 0 ? '− ' + COP(f.deuda) : '—'}</td>
                       <td style={{ fontWeight: 700 }}>{COP(f.total)}</td>
@@ -3496,7 +3511,7 @@ function AdminCierreCiclo({ showToast }) {
             <div className="mr" key={c.id}>
               <div className="mi2">
                 <div className="nm">Ciclo {nombreCiclo(c.anio_inicio)}</div>
-                <div className="mt">Cerrado el {c.fecha_cierre} · Ganancias {COP(c.total_ganancias)} · {COP(Math.round(c.valor_bloque))} por cada $100.000</div>
+                <div className="mt">Cerrado el {c.fecha_cierre} · Ganancias {COP(c.total_ganancias)} · {COP(Math.round(c.valor_bloque))} por cupo</div>
               </div>
               <button className="btn sm ghost" onClick={() => setVerLiq(verLiq === c.id ? null : c.id)}>{verLiq === c.id ? 'Ocultar' : 'Ver'}</button>
             </div>
